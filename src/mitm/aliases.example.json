@@ -1,0 +1,14 @@
+{
+  "_readme": "Copy this file to ~/.9router/mitm/aliases.json and change the provider values to match your own 9router provider/combo names.",
+  "kiro": {
+    "simple-task":        "YOUR_PROVIDER_OR_COMBO",
+    "auto":               "YOUR_PROVIDER_OR_COMBO",
+    "claude-sonnet-4.5":  "YOUR_PROVIDER_OR_COMBO",
+    "claude-sonnet-4":    "YOUR_PROVIDER_OR_COMBO",
+    "claude-haiku-4.5":   "YOUR_PROVIDER_OR_COMBO",
+    "deepseek-3.2":       "YOUR_PROVIDER_OR_COMBO",
+    "minimax-m2.5":       "YOUR_PROVIDER_OR_COMBO",
+    "minimax-m2.1":       "YOUR_PROVIDER_OR_COMBO",
+    "glm-5":              "YOUR_PROVIDER_OR_COMBO"
+  }
+}
