@@ -17,6 +17,7 @@ import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
 import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/streamingHandler.js";
 import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.js";
 import { dedupeTools } from "../utils/toolDeduper.js";
+import { sanitizeSystemRole } from "../translator/helpers/claudeHelper.js";
 import { injectCaveman } from "../rtk/caveman.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
 
@@ -91,6 +92,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (passthrough) {
     log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
     translatedBody = { ...body, model: upstreamModel };
+    // Sanitize system role: Anthropic no longer accepts role:'system' in messages[]
+    if (provider === "claude" || provider?.startsWith("anthropic-compatible")) {
+      translatedBody = sanitizeSystemRole(translatedBody);
+    }
   } else {
     translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
     if (!translatedBody) {
@@ -263,6 +268,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (!clientRequestedStreaming && providerRequiresStreaming) {
     const result = await handleForcedSSEToJson({ ...sharedCtx, providerResponse, sourceFormat, trackDone, appendLog });
     if (result) { streamController.handleComplete(); return result; }
+
+    // Some providers in this bucket can still return ordinary JSON when the
+    // translated payload contains stream:false, even with missing or incorrect
+    // Content-Type. handleNonStreamingResponse still treats explicit SSE as SSE
+    // and otherwise safely attempts JSON parsing with its own error handling.
+    const jsonResult = await handleNonStreamingResponse({ ...sharedCtx, stream: false, providerResponse, sourceFormat, targetFormat, reqLogger, toolNameMap, trackDone, appendLog });
+    streamController.handleComplete();
+    return jsonResult;
   }
 
   // True non-streaming response

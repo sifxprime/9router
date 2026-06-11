@@ -40,11 +40,22 @@ function kiroRegion(conn) {
 }
 
 function getConnectionLabel(connection) {
-  const isEmail = (value) =>
-    typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  if (isEmail(connection.email)) return connection.email;
-  if (isEmail(connection.name)) return connection.name;
-  return connection.name;
+  return connection.name?.trim()
+    || connection.email?.trim()
+    || connection.displayName?.trim()
+    || null;
+}
+
+function getConnectionSecondaryLabel(connection) {
+  if (connection.name?.trim() && connection.email?.trim() && connection.name.trim() !== connection.email.trim()) {
+    return connection.email.trim();
+  }
+
+  if (connection.name?.trim() && connection.displayName?.trim() && connection.name.trim() !== connection.displayName.trim()) {
+    return connection.displayName.trim();
+  }
+
+  return null;
 }
 
 function getConnectionQuotaRemaining(connection, quotaData) {
@@ -1036,46 +1047,11 @@ export default function ProviderLimits() {
                           {getConnectionLabel(conn)}
                         </p>
                       ) : null}
-                      {conn.provider === "kiro" && (
-                        <div className="mt-1 flex flex-wrap items-center gap-1">
-                          <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
-                            {kiroMethodLabel(conn)}
-                          </span>
-                          {kiroRegion(conn) && (
-                            <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                              {kiroRegion(conn)}
-                            </span>
-                          )}
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                              isInactive
-                                ? "bg-surface-2 text-text-muted"
-                                : conn.testStatus === "active" || conn.testStatus === "success"
-                                  ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                                  : conn.testStatus === "error" || conn.testStatus === "expired" || conn.testStatus === "unavailable"
-                                    ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                                    : "bg-surface-2 text-text-muted"
-                            }`}
-                          >
-                            {isInactive ? "disabled" : conn.testStatus || "unknown"}
-                          </span>
-                          {conn.providerSpecificData?.profileArn && (
-                            <button
-                              type="button"
-                              onClick={() => copy(conn.providerSpecificData.profileArn, conn.id)}
-                              title={conn.providerSpecificData.profileArn}
-                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle px-2 py-0.5 text-[10px] text-text-muted transition-colors hover:text-primary"
-                            >
-                              <span className="material-symbols-outlined text-[12px]">
-                                {copied === conn.id ? "check" : "content_copy"}
-                              </span>
-                              <code className="truncate font-mono">
-                                {conn.providerSpecificData.profileArn}
-                              </code>
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      {getConnectionSecondaryLabel(conn) ? (
+                        <p className="text-[11px] text-text-muted/80 truncate">
+                          {getConnectionSecondaryLabel(conn)}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
 

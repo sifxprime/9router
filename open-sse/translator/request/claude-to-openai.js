@@ -2,6 +2,54 @@ import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { adjustMaxTokens } from "../helpers/maxTokensHelper.js";
 
+const WEB_SEARCH_TOOL_TYPES = /^web_search/;
+const CLAUDE_AGENT_TOOL_NAMES = new Set(["Agent"]);
+
+function isClaudeWebSearchTool(tool) {
+  return typeof tool?.type === "string" && WEB_SEARCH_TOOL_TYPES.test(tool.type);
+}
+
+function sanitizeClaudeAgentInput(toolName, input) {
+  if (!CLAUDE_AGENT_TOOL_NAMES.has(toolName) || !input || typeof input !== "object" || Array.isArray(input)) {
+    return input || {};
+  }
+  if (!("isolation" in input)) return input;
+  const { isolation, ...sanitizedInput } = input;
+  return sanitizedInput;
+}
+
+function sanitizeClaudeAgentSchema(tool) {
+  const schema = tool.input_schema || { type: "object", properties: {} };
+  if (!CLAUDE_AGENT_TOOL_NAMES.has(tool.name) || !schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return schema;
+  }
+  const properties = schema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties) || !("isolation" in properties)) {
+    return schema;
+  }
+  const { isolation, ...sanitizedProperties } = properties;
+  const sanitizedSchema = { ...schema, properties: sanitizedProperties };
+  if (Array.isArray(schema.required)) {
+    sanitizedSchema.required = schema.required.filter(key => key !== "isolation");
+  }
+  return sanitizedSchema;
+}
+
+function convertClaudeTool(tool) {
+  if (isClaudeWebSearchTool(tool)) {
+    const { input_schema, ...nativeTool } = tool;
+    return nativeTool;
+  }
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: String(tool.description || ""),
+      parameters: sanitizeClaudeAgentSchema(tool),
+    }
+  };
+}
+
 function stripAnthropicBillingHeader(text) {
   if (typeof text !== "string") return "";
   return text.replace(/^x-anthropic-billing-header:[^\n]*(?:\r?\n)?/i, "");
@@ -60,16 +108,9 @@ export function claudeToOpenAIRequest(model, body, stream) {
   // Fix missing tool responses - OpenAI requires every tool_call to have a response
   fixMissingToolResponses(result.messages);
 
-  // Tools
+  // Tools — web_search native pass-through, Agent isolation sanitization
   if (body.tools && Array.isArray(body.tools)) {
-    result.tools = body.tools.map(tool => ({
-      type: "function",
-      function: {
-        name: tool.name,
-        description: String(tool.description || ""),
-        parameters: tool.input_schema || { type: "object", properties: {} }
-      }
-    }));
+    result.tools = body.tools.map(convertClaudeTool);
   }
 
   // Tool choice
@@ -154,7 +195,7 @@ function convertClaudeMessage(msg) {
             type: "function",
             function: {
               name: block.name,
-              arguments: JSON.stringify(block.input || {})
+              arguments: JSON.stringify(sanitizeClaudeAgentInput(block.name, block.input) || {})
             }
           });
           break;
