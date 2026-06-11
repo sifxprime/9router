@@ -1141,6 +1141,7 @@ export default function ProviderDetailPage() {
     if (isAnthropicCompatible) {
       return "/providers/anthropic-m.png";
     }
+    if (providerInfo?.iconFile) return providerInfo.iconFile;
     return `/providers/${providerInfo.id}.png`;
   };
 
@@ -1339,7 +1340,7 @@ export default function ProviderDetailPage() {
                     ))}
                   </select>
                 </div>
-              )} */}
+              )}
               {/* Round Robin toggle */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-text-muted font-medium">Round Robin</span>

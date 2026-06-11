@@ -73,6 +73,6 @@ scripts/agSniffer/*
 gitbooks/*
 gitbook/README.md
 
-# Local agent knowledge files
-AGENTS.md
-**/AGENTS.md
+# AI tools
+.claude/
+.codewhale/

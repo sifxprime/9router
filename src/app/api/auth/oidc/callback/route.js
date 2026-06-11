@@ -7,9 +7,12 @@ import {
   getPublicOrigin,
   pickOidcDisplayName,
   pickOidcEmail,
+  sanitizeOidcError,
   verifyOidcIdToken,
 } from "@/lib/auth/oidc";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
+import { getSettingsSafe } from "@/lib/localDb";
+import { isTunnelDashboardAccessDenied } from "@/shared/utils/tunnelRequest";
 
 function clearOidcCookies(cookieStore) {
   cookieStore.delete("oidc_state");
@@ -19,9 +22,10 @@ function clearOidcCookies(cookieStore) {
 
 export async function GET(request) {
   const url = new URL(request.url);
-  const error = url.searchParams.get("error");
-  if (error) {
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(error)}`, getPublicOrigin(request)));
+  const rawError = url.searchParams.get("error");
+  if (rawError) {
+    const safeError = sanitizeOidcError(rawError, "oidc_provider_error");
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(safeError)}`, getPublicOrigin(request)));
   }
 
   const code = url.searchParams.get("code");
@@ -41,6 +45,12 @@ export async function GET(request) {
   }
 
   try {
+    const settings = await getSettingsSafe();
+    if (isTunnelDashboardAccessDenied(request, settings)) {
+      clearOidcCookies(cookieStore);
+      return NextResponse.redirect(new URL("/login?error=tunnel_dashboard_disabled", getPublicOrigin(request)));
+    }
+
     const config = await getOidcRuntimeConfig();
     if (!config) {
       clearOidcCookies(cookieStore);
@@ -81,7 +91,8 @@ export async function GET(request) {
 
     return NextResponse.redirect(new URL("/dashboard", getPublicOrigin(request)));
   } catch (error) {
+    console.error("[OIDC callback] Authentication failed:", error);
     clearOidcCookies(cookieStore);
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(error.message || "oidc_callback_failed")}`, getPublicOrigin(request)));
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(sanitizeOidcError(error, "oidc_callback_failed"))}`, getPublicOrigin(request)));
   }
 }

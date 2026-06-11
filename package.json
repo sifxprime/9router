@@ -5,11 +5,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --port 20128",
-    "build": "next build --webpack && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public",
-    "start": "next start",
+    "build": "next build --webpack",
+    "start": "next start --port 20128",
     "dev:bun": "bun --bun next dev --webpack --port 20128",
     "build:bun": "bun --bun next build --webpack",
-    "start:bun": "bun ./.next/standalone/server.js"
+    "start:bun": "bun ./.next/standalone/server.js --port 20128"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

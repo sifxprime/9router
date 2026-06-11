@@ -128,7 +128,8 @@ export const PROVIDERS = {
   },
   "vercel-ai-gateway": {
     baseUrl: "https://ai-gateway.vercel.sh/v1/chat/completions",
-    format: "openai"
+    format: "openai",
+    retry: { 429: 2 }
   },
   glm: {
     baseUrl: "https://api.z.ai/api/anthropic/v1/messages",
@@ -267,6 +268,12 @@ export const PROVIDERS = {
       "x-command-code-version": "0.25.7",
       "x-cli-environment": "cli"
     }
+  },
+  "commandcode-cli": {
+    baseUrl: "cmd",
+    format: "openai",
+    headers: {},
+    noAuth: true
   },
   groq: {
     baseUrl: "https://api.groq.com/openai/v1/chat/completions",
@@ -437,6 +444,14 @@ export const PROVIDERS = {
   "nous-research": { baseUrl: "https://inference-api.nousresearch.com/v1/chat/completions", format: "openai" },
   glhf: { baseUrl: "https://glhf.chat/api/openai/v1/chat/completions", format: "openai" },
   blackbox: { baseUrl: "https://api.blackbox.ai/chat/completions", format: "openai" },
+  // Amazon Bedrock — Converse API on bedrock-runtime
+  // Supports Bearer token (Bedrock API key) and SigV4 (IAM credentials).
+  // Model IDs: anthropic.claude-sonnet-4-6 / us.anthropic.claude-sonnet-4-6 etc.
+  bedrock: {
+    baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+    format:  "openai",
+    headers: {},
+  },
 };
 
 export const OLLAMA_LOCAL_DEFAULT_HOST = "http://localhost:11434";

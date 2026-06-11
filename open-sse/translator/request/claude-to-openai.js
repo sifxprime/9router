@@ -75,6 +75,27 @@ export function claudeToOpenAIRequest(model, body, stream) {
     result.temperature = body.temperature;
   }
 
+  // Map Claude thinking → OpenAI reasoning_effort (symmetric to openai-to-claude.js).
+  // Without this, Claude clients targeting OpenAI-format providers (e.g. Vercel AI Gateway,
+  // OpenRouter, OpenAI) silently lose reasoning intent.
+  if (body.thinking && !result.reasoning_effort) {
+    if (body.thinking.type === "enabled") {
+      const budget = body.thinking.budget_tokens || 0;
+      if (budget <= 0) {
+        // No explicit budget → default medium
+        result.reasoning_effort = "medium";
+      } else if (budget <= 2048) {
+        result.reasoning_effort = "low";
+      } else if (budget <= 16384) {
+        result.reasoning_effort = "medium";
+      } else {
+        result.reasoning_effort = "high";
+      }
+    } else if (body.thinking.type === "disabled") {
+      result.reasoning_effort = "none";
+    }
+  }
+
   // System message
   if (body.system) {
     const systemContent = Array.isArray(body.system)

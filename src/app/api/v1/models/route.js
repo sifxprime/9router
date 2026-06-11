@@ -7,9 +7,15 @@ import {
 } from "@/shared/constants/providers";
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
+import {
+  comboMatchesKinds as comboMatchesKindsCore,
+  getModelKind,
+  inferKindFromModelId,
+  providerMatchesKinds as providerMatchesKindsCore,
+} from "@/lib/modelRegistry";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
-import { resolveOpencodeModels } from "open-sse/services/opencodeModels.js";
+import { resolveCommandCodeCliModels } from "open-sse/services/commandCodeCliModels.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -36,7 +42,13 @@ const LIVE_MODEL_RESOLVERS = {
       models: result.models.map((m) => ({ id: m.id, name: m.name })),
     };
   },
-  opencode: async (conn) => resolveOpencodeModels(conn, { log: console }),
+  "commandcode-cli": async (conn) => {
+    const result = await resolveCommandCodeCliModels({
+      providerSpecificData: conn.providerSpecificData || {},
+      timeoutMs: 10000,
+    });
+    return result?.models?.length ? { models: result.models } : null;
+  }
 };
 
 const parseOpenAIStyleModels = (data) => {
@@ -50,29 +62,26 @@ const UPSTREAM_CONNECTION_RE = /[-_][0-9a-f]{8,}$/i;
 // LLM kind sentinel — combos/models with no explicit kind default to LLM
 const LLM_KIND = "llm";
 
-// Map per-model `type` field (in PROVIDER_MODELS) to service kind.
-// Models without `type` are treated as LLM.
-const MODEL_TYPE_TO_KIND = {
-  image: "image",
-  tts: "tts",
-  embedding: "embedding",
-  stt: "stt",
-  imageToText: "imageToText",
+const KIND_TO_AUTO_SUFFIX = {
+  llm: "",
+  image: ":image",
+  video: ":video",
+  tts: ":tts",
+  stt: ":stt",
+  embedding: ":embedding",
+  imageToText: ":image-to-text",
+  webSearch: ":search",
+  webFetch: ":fetch",
 };
 
 function modelKind(model) {
-  if (!model?.type) return LLM_KIND;
-  return MODEL_TYPE_TO_KIND[model.type] || LLM_KIND;
+  return getModelKind(model);
 }
 
 // For dynamic/unknown model IDs (compatible providers, alias map, custom models)
 // fall back to provider-level kind matching when per-model type is unavailable.
 function inferKindFromUnknownModelId(modelId) {
-  const lower = String(modelId).toLowerCase();
-  if (/embed/.test(lower)) return "embedding";
-  if (/tts|speech|audio|voice/.test(lower)) return "tts";
-  if (/image|imagen|dall-?e|flux|sdxl|sd-|stable-diffusion/.test(lower)) return "image";
-  return LLM_KIND;
+  return inferKindFromModelId(modelId);
 }
 
 async function fetchCompatibleModelIds(connection) {
@@ -135,18 +144,13 @@ async function fetchCompatibleModelIds(connection) {
 // Provider matches kindFilter when its serviceKinds intersect the requested kinds.
 // LLM is the default kind for providers missing serviceKinds.
 function providerMatchesKinds(providerId, kindFilter) {
-  const provider = AI_PROVIDERS[providerId];
-  const kinds = Array.isArray(provider?.serviceKinds) && provider.serviceKinds.length > 0
-    ? provider.serviceKinds
-    : [LLM_KIND];
-  return kindFilter.some((k) => kinds.includes(k));
+  return providerMatchesKindsCore(providerId, kindFilter);
 }
 
 // Combo matches kindFilter when its `kind` field is in the list.
 // Combos with no kind are treated as LLM.
 function comboMatchesKinds(combo, kindFilter) {
-  const kind = combo?.kind || LLM_KIND;
-  return kindFilter.includes(kind);
+  return comboMatchesKindsCore(combo, kindFilter);
 }
 
 /**
@@ -195,6 +199,22 @@ export async function buildModelsList(kindFilter) {
   for (const conn of connections) {
     if (!activeConnectionByProvider.has(conn.provider)) {
       activeConnectionByProvider.set(conn.provider, conn);
+    }
+  }
+
+  for (const [providerId, providerInfo] of Object.entries(AI_PROVIDERS)) {
+    if (providerInfo?.noAuth !== true || activeConnectionByProvider.has(providerId)) continue;
+    const staticAlias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
+    const hasStaticModels = Array.isArray(PROVIDER_MODELS[staticAlias]) && PROVIDER_MODELS[staticAlias].length > 0;
+    const hasLiveResolver = typeof LIVE_MODEL_RESOLVERS[providerId] === "function";
+    const hasSubConfigModels =
+      (Array.isArray(providerInfo?.ttsConfig?.models) && providerInfo.ttsConfig.models.length > 0) ||
+      (Array.isArray(providerInfo?.embeddingConfig?.models) && providerInfo.embeddingConfig.models.length > 0);
+    if (hasStaticModels || hasLiveResolver || hasSubConfigModels) {
+      activeConnectionByProvider.set(providerId, {
+        provider: providerId,
+        providerSpecificData: {},
+      });
     }
   }
 
@@ -419,6 +439,20 @@ export async function buildModelsList(kindFilter) {
 
   const dedupedModels = [];
   const seenModelIds = new Set();
+  const autoKind = kindFilter.length === 1 ? kindFilter[0] : null;
+  const autoSuffix = KIND_TO_AUTO_SUFFIX[autoKind];
+  if (models.length > 0 && autoSuffix !== undefined) {
+    for (const prefix of ["auto", "best", "fast", "cheap"]) {
+      const id = `${prefix}${autoSuffix}`;
+      dedupedModels.push({
+        id,
+        object: "model",
+        owned_by: "9router",
+        kind: autoKind,
+      });
+      seenModelIds.add(id);
+    }
+  }
   for (const model of models) {
     if (!model?.id || seenModelIds.has(model.id)) continue;
     seenModelIds.add(model.id);

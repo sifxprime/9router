@@ -35,6 +35,8 @@ const ALIAS_TO_PROVIDER_ID = {
   deepseek: "deepseek",
   cmc: "commandcode",
   commandcode: "commandcode",
+  cccli: "commandcode-cli",
+  "commandcode-cli": "commandcode-cli",
   groq: "groq",
   xai: "xai",
   mistral: "mistral",
@@ -140,6 +142,9 @@ const ALIAS_TO_PROVIDER_ID = {
   glhf: "glhf",
   bb: "blackbox",
   blackbox: "blackbox",
+  // Amazon Bedrock
+  bedrock: "bedrock",
+  br: "bedrock",
 };
 
 /**

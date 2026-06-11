@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
-import { getSettings } from "@/lib/localDb";
+import { getSettingsSafe } from "@/lib/localDb";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { isOidcConfigured } from "@/lib/auth/oidc";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
+import { isTunnelDashboardAccessDenied } from "@/shared/utils/tunnelRequest";
 
 const RESET_HINT = "Forgot password? Reset to default via 9Router CLI → Settings → Reset Password to Default.";
-
-function isTunnelRequest(request, settings) {
-  const host = (request.headers.get("host") || "").split(":")[0].toLowerCase();
-  const tunnelHost = settings.tunnelUrl ? new URL(settings.tunnelUrl).hostname.toLowerCase() : "";
-  const tailscaleHost = settings.tailscaleUrl ? new URL(settings.tailscaleUrl).hostname.toLowerCase() : "";
-  return (tunnelHost && host === tunnelHost) || (tailscaleHost && host === tailscaleHost);
-}
 
 export async function POST(request) {
   try {
@@ -27,10 +21,10 @@ export async function POST(request) {
     }
 
     const { password } = await request.json();
-    const settings = await getSettings();
+    const settings = await getSettingsSafe();
 
     // Block login via tunnel/tailscale if dashboard access is disabled
-    if (isTunnelRequest(request, settings) && settings.tunnelDashboardAccess !== true) {
+    if (isTunnelDashboardAccessDenied(request, settings)) {
       return NextResponse.json({ error: "Dashboard access via tunnel is disabled" }, { status: 403 });
     }
 
@@ -71,6 +65,6 @@ export async function POST(request) {
       { status: 401 }
     );
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

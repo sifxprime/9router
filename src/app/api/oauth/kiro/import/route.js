@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { KiroService } from "@/lib/oauth/services/kiro";
-import { createProviderConnection } from "@/models";
+import { createProviderConnection, getProviderConnectionById, updateProviderConnection } from "@/models";
+import { autoSetupMitmForProvider } from "@/lib/mitm/autoSetupForProvider";
 
 /**
  * POST /api/oauth/kiro/import
@@ -8,7 +9,7 @@ import { createProviderConnection } from "@/models";
  */
 export async function POST(request) {
   try {
-    const { refreshToken } = await request.json();
+    const { refreshToken, existingConnectionId } = await request.json();
 
     if (!refreshToken || typeof refreshToken !== "string") {
       return NextResponse.json(
@@ -25,8 +26,7 @@ export async function POST(request) {
     // Extract email from JWT if available
     const email = kiroService.extractEmailFromJWT(tokenData.accessToken);
 
-    // Save to database
-    const connection = await createProviderConnection({
+    const connectionPayload = {
       provider: "kiro",
       authType: "oauth",
       accessToken: tokenData.accessToken,
@@ -39,7 +39,29 @@ export async function POST(request) {
         provider: "Imported",
       },
       testStatus: "active",
-    });
+      lastError: null,
+      lastErrorAt: null,
+      isActive: true,
+    };
+
+    let connection;
+    if (existingConnectionId) {
+      const existing = await getProviderConnectionById(existingConnectionId);
+      if (!existing || existing.provider !== "kiro") {
+        return NextResponse.json({ error: "Invalid connection" }, { status: 400 });
+      }
+      connection = await updateProviderConnection(existingConnectionId, {
+        ...connectionPayload,
+        providerSpecificData: {
+          ...(existing.providerSpecificData || {}),
+          ...connectionPayload.providerSpecificData,
+        },
+      });
+    } else {
+      connection = await createProviderConnection(connectionPayload);
+    }
+
+    const mitm = await autoSetupMitmForProvider("kiro");
 
     return NextResponse.json({
       success: true,
@@ -48,9 +70,10 @@ export async function POST(request) {
         provider: connection.provider,
         email: connection.email,
       },
+      mitm,
     });
   } catch (error) {
-    console.log("Kiro import token error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Kiro import token error:", error?.message);
+    return NextResponse.json({ error: "Failed to import token" }, { status: 500 });
   }
 }
