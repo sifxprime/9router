@@ -9,6 +9,7 @@ import { getProviderConnections, getCombos, getCustomModels, getModelAliases } f
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
+import { resolveOpencodeModels } from "open-sse/services/opencodeModels.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -34,7 +35,8 @@ const LIVE_MODEL_RESOLVERS = {
     return {
       models: result.models.map((m) => ({ id: m.id, name: m.name })),
     };
-  }
+  },
+  opencode: async (conn) => resolveOpencodeModels(conn, { log: console }),
 };
 
 const parseOpenAIStyleModels = (data) => {
@@ -248,6 +250,19 @@ export async function buildModelsList(kindFilter) {
       });
     }
   } else {
+    // noAuth providers (e.g. opencode, uncloseai) have no stored connections but
+    // should appear in /v1/models when they have static models defined.
+    for (const [providerId, providerConfig] of Object.entries(AI_PROVIDERS)) {
+      if (!providerConfig.noAuth) continue;
+      if (activeConnectionByProvider.has(providerId)) continue;
+      const staticAlias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
+      if (!PROVIDER_MODELS[staticAlias]?.length) continue;
+      activeConnectionByProvider.set(providerId, {
+        provider: providerId,
+        providerSpecificData: {},
+      });
+    }
+
     for (const [providerId, conn] of activeConnectionByProvider.entries()) {
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
 
@@ -433,7 +448,7 @@ export async function OPTIONS() {
 export async function GET() {
   try {
     const data = await buildModelsList([LLM_KIND]);
-    return Response.json({ object: "list", data }, {
+    return Response.json({ object: "list", data, models: data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
   } catch (error) {

@@ -358,9 +358,12 @@ function flushEvents(state) {
 // currentToolCallId is intentionally sticky for the current turn so flush/completion
   // can still finalize as tool_calls even if the tool call was emitted before stream end.
 function computeFinishReason(state) {
-   return state.toolCallIndex > 0 || state.currentToolCallId
-    ? "tool_calls"
-    : "stop";
+  if (state.explicitFinishReason) return state.explicitFinishReason;
+  
+  if (state.toolCallIndex > 0 || state.currentToolCallId) {
+    return "tool_calls";
+  }
+  return "stop";
 }
 
 /**
@@ -407,6 +410,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     state.created = Math.floor(Date.now() / 1000);
     state.toolCallIndex = 0;
     state.currentToolCallId = null;
+    state.firstContentSent = false; // Track to send role: "assistant" in first delta chunk
   }
 
   // Text content delta
@@ -421,7 +425,10 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       model: state.model || "unknown",
       choices: [{
         index: 0,
-        delta: { content: delta },
+        delta: Object.assign(
+          !state.firstContentSent ? (state.firstContentSent = true, { role: "assistant" }) : {},
+          { content: delta }
+        ),
         finish_reason: null
       }]
     };
@@ -436,6 +443,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
   if (eventType === "response.output_item.added" && (data.item?.type === "function_call" || data.item?.type === "custom_tool_call")) {
     const item = data.item;
     state.currentToolCallId = item.call_id || `call_${Date.now()}`;
+    state.currentToolCallArgs = ""; // Initialize args tracking
 
     return {
       id: state.chatId,
@@ -444,17 +452,20 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       model: state.model || "unknown",
       choices: [{
         index: 0,
-        delta: {
-          tool_calls: [{
-            index: state.toolCallIndex,
-            id: state.currentToolCallId,
-            type: "function",
-            function: {
-              name: item.name || "",
-              arguments: ""
-            }
-          }]
-        },
+        delta: Object.assign(
+          !state.firstContentSent ? (state.firstContentSent = true, { role: "assistant", content: null }) : {},
+          {
+            tool_calls: [{
+              index: state.toolCallIndex,
+              id: state.currentToolCallId,
+              type: "function",
+              function: {
+                name: item.name || "",
+                arguments: ""
+              }
+            }]
+          }
+        ),
         finish_reason: null
       }]
     };
@@ -464,6 +475,8 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
   if (eventType === "response.function_call_arguments.delta" || eventType === "response.custom_tool_call_input.delta") {
     const argsDelta = data.delta || "";
     if (!argsDelta) return null;
+    
+    state.currentToolCallArgs = (state.currentToolCallArgs || "") + argsDelta;
 
     return {
       id: state.chatId,
@@ -491,6 +504,9 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
 
   // Response completed
   if (eventType === "response.completed" || eventType === "response.done") {
+    if (data.response?.status === "incomplete" || data.response?.status_details?.reason === "max_output_tokens") {
+      state.explicitFinishReason = "length";
+    }
     // Extract usage from response.completed event
     const responseUsage = data.response?.usage;
     if (responseUsage && typeof responseUsage === "object") {

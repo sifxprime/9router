@@ -82,15 +82,18 @@ export const PROVIDER_MODELS = {
     { id: "iflow-rome-30ba3b", name: "iFlow ROME" },
   ],
   ag: [  // Antigravity - special case: models call different backends
+    // Latest AG entries.
+    { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Extra Low)" },
     { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High)" },
     { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium)" },
-    { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Low)" },
-    { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)" },
-    { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
+    // Compatibility aliases for existing account mappings.
+    { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)", upstreamModelId: "gemini-2.5-flash" },
+    { id: "gemini-pro-agent", name: "Gemini Pro Agent", upstreamModelId: "gemini-2.5-flash" },
+    { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", upstreamModelId: "gemini-2.5-flash" },
     { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
     { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
     { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
-    { id: "gemini-3-flash", name: "Gemini 3 Flash", thinking: false }, // command model; AG strips thinking
+    { id: "gemini-3-flash", name: "Gemini 3 Flash", thinking: false, upstreamModelId: "gemini-2.5-flash" }, // command model; AG strips thinking
   ],
   gh: [  // GitHub Copilot - OpenAI models
     { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
@@ -204,12 +207,14 @@ export const PROVIDER_MODELS = {
     { id: "minimax-m2.7", name: "MiniMax M2.7", targetFormat: "claude" },
     { id: "minimax-m2.5", name: "MiniMax M2.5", targetFormat: "claude" },
   ],
-  oc: [  // OpenCode
-    // { id: "nemotron-3-super-free", name: "Nemotron 3 Super" },
-    // { id: "qwen3.6-plus-free", name: "Qwen 3.6 Plus" },
-    // { id: "big-pickle", name: "Big Pickle", targetFormat: "claude" },
-    // { id: "minimax-m2.5-free", name: "MiniMax M2.5", targetFormat: "claude" },
-    // { id: "trinity-large-preview-free", name: "Trinity Large Preview" },
+  oc: [  // OpenCode Free — no auth required, models from opencode.ai/zen/v1/models
+    { id: "big-pickle", name: "Big Pickle" },
+    { id: "deepseek-v4-flash-free", name: "DeepSeek V4 Flash Free" },
+    { id: "mimo-v2.5-free", name: "MiMo V2.5 Free" },
+    { id: "minimax-m3-free", name: "MiniMax M3 Free" },
+    { id: "north-mini-code-free", name: "North Mini Code Free" },
+    { id: "nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
+    { id: "qwen3.6-plus-free", name: "Qwen 3.6 Plus Free" },
   ],
 
   cl: [  // Cline
