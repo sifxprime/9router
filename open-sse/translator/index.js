@@ -41,6 +41,7 @@ function ensureInitialized() {
   require("./request/openai-to-cursor.js");
   require("./request/openai-to-ollama.js");
   require("./request/openai-to-commandcode.js");
+  require("./request/claude-to-kiro.js");
 
   // Response translators
   require("./response/claude-to-openai.js");
@@ -52,6 +53,7 @@ function ensureInitialized() {
   require("./response/cursor-to-openai.js");
   require("./response/ollama-to-openai.js");
   require("./response/commandcode-to-openai.js");
+  require("./response/kiro-to-claude.js");
 }
 
 // Strip specific content types from messages (explicit opt-in via strip[] in PROVIDER_MODELS)
@@ -90,21 +92,29 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
 
   // If same format, skip translation steps
   if (sourceFormat !== targetFormat) {
-    // Step 1: source -> openai (if source is not openai)
-    if (sourceFormat !== FORMATS.OPENAI) {
-      const toOpenAI = requestRegistry.get(`${sourceFormat}:${FORMATS.OPENAI}`);
-      if (toOpenAI) {
-        result = toOpenAI(model, result, stream, credentials);
-        // Log OpenAI intermediate format
-        reqLogger?.logOpenAIRequest?.(result);
+    // Direct route: if a translator is registered for this exact source:target
+    // pair, use it instead of pivoting through OpenAI. This is lossless for
+    // pairs like claude:kiro (avoids the claude->openai->kiro double-hop).
+    const directFn = requestRegistry.get(`${sourceFormat}:${targetFormat}`);
+    if (directFn) {
+      result = directFn(model, result, stream, credentials);
+    } else {
+      // Step 1: source -> openai (if source is not openai)
+      if (sourceFormat !== FORMATS.OPENAI) {
+        const toOpenAI = requestRegistry.get(`${sourceFormat}:${FORMATS.OPENAI}`);
+        if (toOpenAI) {
+          result = toOpenAI(model, result, stream, credentials);
+          // Log OpenAI intermediate format
+          reqLogger?.logOpenAIRequest?.(result);
+        }
       }
-    }
 
-    // Step 2: openai -> target (if target is not openai)
-    if (targetFormat !== FORMATS.OPENAI) {
-      const fromOpenAI = requestRegistry.get(`${FORMATS.OPENAI}:${targetFormat}`);
-      if (fromOpenAI) {
-        result = fromOpenAI(model, result, stream, credentials);
+      // Step 2: openai -> target (if target is not openai)
+      if (targetFormat !== FORMATS.OPENAI) {
+        const fromOpenAI = requestRegistry.get(`${FORMATS.OPENAI}:${targetFormat}`);
+        if (fromOpenAI) {
+          result = fromOpenAI(model, result, stream, credentials);
+        }
       }
     }
   }
@@ -156,6 +166,16 @@ export function translateResponse(targetFormat, sourceFormat, chunk, state) {
 
   let results = [chunk];
   let openaiResults = null; // Store OpenAI intermediate results
+
+  // Direct route: if a response translator is registered for this exact
+  // target:source pair, use it instead of pivoting through OpenAI. Mirrors the
+  // request-side direct route (e.g. kiro:claude — KiroExecutor already emits
+  // OpenAI-shaped chunks, so this converts them straight to Claude SSE).
+  const directFn = responseRegistry.get(`${targetFormat}:${sourceFormat}`);
+  if (directFn) {
+    const converted = directFn(chunk, state);
+    return converted ? (Array.isArray(converted) ? converted : [converted]) : [];
+  }
 
   // Step 1: target -> openai (if target is not openai)
   if (targetFormat !== FORMATS.OPENAI) {

@@ -2,6 +2,11 @@ import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { adjustMaxTokens } from "../helpers/maxTokensHelper.js";
 
+function stripAnthropicBillingHeader(text) {
+  if (typeof text !== "string") return "";
+  return text.replace(/^x-anthropic-billing-header:[^\n]*(?:\r?\n)?/i, "");
+}
+
 // Convert Claude request to OpenAI format
 export function claudeToOpenAIRequest(model, body, stream) {
   const result = {
@@ -10,9 +15,11 @@ export function claudeToOpenAIRequest(model, body, stream) {
     stream: stream
   };
 
-  // Max tokens
+  // Max tokens — GPT-5.4+ requires max_completion_tokens instead of max_tokens
   if (body.max_tokens) {
-    result.max_tokens = adjustMaxTokens(body);
+    const isGpt54Plus = /^gpt-5\.[4-9]|^gpt-5\.\d{2,}/.test(model);
+    const tokenKey = isGpt54Plus ? "max_completion_tokens" : "max_tokens";
+    result[tokenKey] = adjustMaxTokens(body);
   }
 
   // Temperature
@@ -23,8 +30,8 @@ export function claudeToOpenAIRequest(model, body, stream) {
   // System message
   if (body.system) {
     const systemContent = Array.isArray(body.system)
-      ? body.system.map(s => s.text || "").join("\n")
-      : body.system;
+      ? body.system.map(s => stripAnthropicBillingHeader(s.text || "")).filter(Boolean).join("\n")
+      : stripAnthropicBillingHeader(body.system);
     
     if (systemContent) {
       result.messages.push({
@@ -229,4 +236,3 @@ function convertToolChoice(choice) {
 
 // Register
 register(FORMATS.CLAUDE, FORMATS.OPENAI, claudeToOpenAIRequest, null);
-

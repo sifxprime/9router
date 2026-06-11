@@ -17,9 +17,12 @@ export function openaiToClaudeRequest(model, body, stream) {
     stream: stream
   };
 
-  // Temperature
+  // Temperature — claude-opus-4+ and claude-sonnet-4+ deprecated temperature param
   if (body.temperature !== undefined) {
-    result.temperature = body.temperature;
+    const isNewClaudeModel = /claude-(opus|sonnet|haiku)-4[-.]?[5-9]|claude-(opus|sonnet|haiku)-[5-9]/.test(model);
+    if (!isNewClaudeModel) {
+      result.temperature = body.temperature;
+    }
   }
 
   // Messages

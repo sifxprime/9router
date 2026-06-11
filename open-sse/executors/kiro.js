@@ -21,7 +21,17 @@ export class KiroExecutor extends BaseExecutor {
       "Amz-Sdk-Invocation-Id": uuidv4()
     };
 
-    if (credentials.accessToken) {
+    // API-key auth: the key is stored as accessToken and sent as a bearer token
+    // exactly like an OAuth access token, but with an extra `tokentype: API_KEY`
+    // header so CodeWhisperer treats it as a long-lived API key rather than an
+    // OIDC/social access token. Mirrors the Kiro IDE headless-auth behavior.
+    const isApiKey = credentials?.providerSpecificData?.authMethod === "api_key";
+
+    const apiKey = credentials?.apiKey || (isApiKey ? credentials?.accessToken : null);
+    if (isApiKey && apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+      headers["tokentype"] = "API_KEY";
+    } else if (credentials.accessToken) {
       headers["Authorization"] = `Bearer ${credentials.accessToken}`;
     }
 

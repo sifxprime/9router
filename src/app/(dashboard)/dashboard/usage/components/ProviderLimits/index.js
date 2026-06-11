@@ -8,6 +8,36 @@ import { parseQuotaData, calculatePercentage } from "./utils";
 import Card from "@/shared/components/Card";
 import { EditConnectionModal } from "@/shared/components";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+
+// Maps the stored providerSpecificData.authMethod to a human label for Kiro.
+// Values come from the Kiro connect flows: builder-id/idc (device code),
+// google/github (social), imported (refresh-token paste), api_key (headless).
+const KIRO_METHOD_LABELS = {
+  "builder-id": "AWS Builder ID",
+  idc: "IAM Identity Center",
+  google: "Google",
+  github: "GitHub",
+  imported: "Imported Token",
+  api_key: "API Key",
+};
+
+function kiroMethodLabel(conn) {
+  const m = conn.providerSpecificData?.authMethod;
+  if (m && KIRO_METHOD_LABELS[m]) return KIRO_METHOD_LABELS[m];
+  return conn.authType === "api_key" ? "API Key" : "OAuth";
+}
+
+// Region is stored for builder-id/idc/api_key flows; social and imported flows
+// omit it, so fall back to the region segment of the profileArn
+// (arn:aws:codewhisperer:<region>:...).
+function kiroRegion(conn) {
+  const r = conn.providerSpecificData?.region;
+  if (r) return r;
+  const arn = conn.providerSpecificData?.profileArn;
+  const seg = typeof arn === "string" ? arn.split(":")[3] : "";
+  return seg || "";
+}
 
 function getConnectionLabel(connection) {
   const isEmail = (value) =>
@@ -221,6 +251,7 @@ const ACCOUNT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const ACCOUNT_PAGE_SIZE_MAX = 500;
 
 export default function ProviderLimits() {
+  const { copied, copy } = useCopyToClipboard();
   const [connections, setConnections] = useState([]);
   const [quotaData, setQuotaData] = useState({});
   const [loading, setLoading] = useState({});
@@ -1005,6 +1036,46 @@ export default function ProviderLimits() {
                           {getConnectionLabel(conn)}
                         </p>
                       ) : null}
+                      {conn.provider === "kiro" && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-600 dark:text-brand-300">
+                            {kiroMethodLabel(conn)}
+                          </span>
+                          {kiroRegion(conn) && (
+                            <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                              {kiroRegion(conn)}
+                            </span>
+                          )}
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              isInactive
+                                ? "bg-surface-2 text-text-muted"
+                                : conn.testStatus === "active" || conn.testStatus === "success"
+                                  ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                                  : conn.testStatus === "error" || conn.testStatus === "expired" || conn.testStatus === "unavailable"
+                                    ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                                    : "bg-surface-2 text-text-muted"
+                            }`}
+                          >
+                            {isInactive ? "disabled" : conn.testStatus || "unknown"}
+                          </span>
+                          {conn.providerSpecificData?.profileArn && (
+                            <button
+                              type="button"
+                              onClick={() => copy(conn.providerSpecificData.profileArn, conn.id)}
+                              title={conn.providerSpecificData.profileArn}
+                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle px-2 py-0.5 text-[10px] text-text-muted transition-colors hover:text-primary"
+                            >
+                              <span className="material-symbols-outlined text-[12px]">
+                                {copied === conn.id ? "check" : "content_copy"}
+                              </span>
+                              <code className="truncate font-mono">
+                                {conn.providerSpecificData.profileArn}
+                              </code>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
