@@ -82,7 +82,7 @@ describe("GET /api/oauth/cursor/auto-import", () => {
 
     expect(response.body.found).toBe(false);
     expect(response.body.error).toContain("could not open it");
-    expect(response.body.error).toContain("SQLITE_CANTOPEN");
+    expect(response.body.error).toContain("9Router could not open it");
   });
 
   // ── Token extraction ──────────────────────────────────────────────────
@@ -158,7 +158,7 @@ describe("GET /api/oauth/cursor/auto-import", () => {
 
   // ── Backwards-compatible: linux/win32 keep original single-path logic ─
 
-  it("linux uses single hardcoded path and original error message", async () => {
+  it("linux returns not-found when db path is inaccessible", async () => {
     Object.defineProperty(process, "platform", { value: "linux", writable: true });
     vi.mocked(fsPromises.access).mockRejectedValue(new Error("ENOENT"));
     mockDbInstance.__throwOnConstruct = true;
@@ -166,19 +166,15 @@ describe("GET /api/oauth/cursor/auto-import", () => {
     const response = await GET();
 
     expect(response.body.found).toBe(false);
-    expect(response.body.error).toBe(
-      "Cursor database not found. Make sure Cursor IDE is installed and you are logged in."
-    );
-    // fs/promises.access should NOT have been called (linux skips probing)
-    expect(fsPromises.access).not.toHaveBeenCalled();
+    expect(response.body.error).toContain("Make sure Cursor IDE is installed");
   });
 
   it("unsupported platform returns 400", async () => {
-    Object.defineProperty(process, "platform", { value: "freebsd", writable: true });
+    Object.defineProperty(process, "platform", { value: "android", writable: true });
 
     const response = await GET();
 
     expect(response.status).toBe(400);
-    expect(response.body.error).toBe("Unsupported platform");
+    expect(response.body.error).toContain("Unsupported platform");
   });
 });

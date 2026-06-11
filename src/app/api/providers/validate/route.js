@@ -9,9 +9,7 @@ import { openaiToCommandCode } from "open-sse/translator/request/openai-to-comma
 import { PROVIDER_ENDPOINTS } from "@/shared/constants/config";
 import { normalizeProviderId } from "@/lib/providerNormalization";
 import { createHmac, createHash } from "crypto";
-=======
 import { resolveCommandCodeCliBin } from "open-sse/services/commandCodeCliBin.js";
->>>>>>> theirs
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
 // Returns true if API key is accepted (status !== 401 && !== 403).

@@ -1,9 +1,16 @@
 import { Readable } from "stream";
+import { createRequire } from "module";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 import { dbg } from "./debugLog.js";
+import { assertSafeResolvedHostname } from "./ssrfGuard.js";
+
+const require = createRequire(import.meta.url);
+const { isKiroMitmHost } = require("../../src/shared/constants/mitmToolHosts.js");
 
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
+const SUPPORTED_PROXY_PROTOCOLS = new Set(["http:", "https:"]);
+const MAX_UPSTREAM_REDIRECTS = 5;
 
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
@@ -142,11 +149,29 @@ async function resolveRealIP(hostname) {
 /**
  * Check if request should bypass MITM DNS redirect
  */
+function hostnameMatchesMitmBypass(hostname, bypassHost) {
+  const host = hostname.toLowerCase();
+  const pattern = bypassHost.toLowerCase();
+  return host === pattern || host.endsWith(`.${pattern}`);
+}
+
 function shouldBypassMitmDns(url) {
   try {
     const hostname = new URL(url).hostname;
-    return MITM_BYPASS_HOSTS.some(host => hostname.includes(host));
+    if (isKiroMitmHost(hostname)) return true;
+    return MITM_BYPASS_HOSTS.some((host) => hostnameMatchesMitmBypass(hostname, host));
   } catch { return false; }
+}
+
+function serializeBypassRequestBody(body) {
+  if (body == null) return undefined;
+  if (typeof body === "string") return body;
+  if (Buffer.isBuffer(body)) return body;
+  if (body instanceof Uint8Array) return Buffer.from(body);
+  if (typeof body === "object" && typeof body.pipe === "function") {
+    throw new Error("[ProxyFetch] Streaming request bodies are not supported on MITM bypass path");
+  }
+  return JSON.stringify(body);
 }
 
 function shouldBypassByNoProxy(targetUrl, noProxyValue) {
@@ -186,18 +211,38 @@ function getEnvProxyUrl(targetUrl) {
 /**
  * Normalize proxy URL (allow host:port)
  */
-function normalizeProxyUrl(proxyUrl) {
+function normalizeProxyUrl(proxyUrl, throwOnError = true) {
   const normalizedInput = normalizeString(proxyUrl);
   if (!normalizedInput) return null;
 
   try {
-
-    new URL(normalizedInput);
-    return normalizedInput;
-  } catch {
-    // Allow "127.0.0.1:7890" style values
-    return `http://${normalizedInput}`;
+    const withProtocol = /^[a-z][a-z\d+\-.]*:\/\//i.test(normalizedInput)
+      ? normalizedInput
+      : `http://${normalizedInput}`;
+    const parsed = new URL(withProtocol);
+    if (!SUPPORTED_PROXY_PROTOCOLS.has(parsed.protocol)) {
+      throw new Error("Proxy URL must use http or https");
+    }
+    if (!parsed.hostname) {
+      throw new Error("Proxy URL host is required");
+    }
+    const normalized = parsed.toString();
+    return parsed.pathname === "/" && !parsed.search && !parsed.hash
+      ? normalized.replace(/\/$/, "")
+      : normalized;
+  } catch (error) {
+    if (throwOnError) throw error;
+    return null;
   }
+}
+
+function normalizeRuntimeProxyUrl(proxyUrl, source) {
+  if (!normalizeString(proxyUrl)) return null;
+  const normalized = normalizeProxyUrl(proxyUrl, false);
+  if (!normalized) {
+    console.warn(`[ProxyFetch] Ignoring invalid ${source} proxy URL`);
+  }
+  return normalized;
 }
 
 function resolveConnectionProxyUrl(targetUrl, proxyOptions) {
@@ -210,7 +255,14 @@ function resolveConnectionProxyUrl(targetUrl, proxyOptions) {
   const noProxy = normalizeString(proxyOptions?.noProxy ?? proxyOptions?.connectionNoProxy);
   if (noProxy && shouldBypassByNoProxy(targetUrl, noProxy)) return null;
 
-  return normalizeProxyUrl(proxyUrlRaw);
+  const normalizedProxyUrl = normalizeProxyUrl(proxyUrlRaw, false);
+  if (!normalizedProxyUrl) {
+    if (proxyOptions?.strictProxy === true) {
+      throw new Error("[ProxyFetch] Strict connection proxy URL is invalid");
+    }
+    console.warn("[ProxyFetch] Ignoring invalid connection proxy URL");
+  }
+  return normalizedProxyUrl;
 }
 
 /**
@@ -244,6 +296,39 @@ async function createBypassRequest(parsedUrl, realIP, options) {
 
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
+    let req = null;
+    let settled = false;
+    let activeRes = null;
+
+    const cleanup = () => {
+      try { req?.destroy(); } catch { /* noop */ }
+      try { activeRes?.destroy(); } catch { /* noop */ }
+      try { socket.destroy(); } catch { /* noop */ }
+    };
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      options.signal?.removeEventListener("abort", onAbort);
+      cleanup();
+      reject(err);
+    };
+
+    const onAbort = () => {
+      if (settled) {
+        cleanup();
+        return;
+      }
+      fail(options.signal?.reason || new Error("aborted"));
+    };
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        fail(options.signal.reason || new Error("aborted"));
+        return;
+      }
+      options.signal.addEventListener("abort", onAbort);
+    }
 
     socket.connect(HTTPS_PORT, realIP, () => {
       const reqOptions = {
@@ -263,7 +348,11 @@ async function createBypassRequest(parsedUrl, realIP, options) {
         },
       };
 
-      const req = https.request(reqOptions, (res) => {
+      req = https.request(reqOptions, (res) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener("abort", onAbort);
+        activeRes = res;
         const response = {
           ok: res.statusCode >= HTTP_SUCCESS_MIN && res.statusCode < HTTP_SUCCESS_MAX,
           status: res.statusCode,
@@ -275,82 +364,182 @@ async function createBypassRequest(parsedUrl, realIP, options) {
             for await (const chunk of res) chunks.push(chunk);
             return Buffer.concat(chunks).toString();
           },
+          // Cursor executor (and any binary-response caller on the MITM-bypass path)
+          // expects a fetch-like arrayBuffer(). Without it: "f.arrayBuffer is not a
+          // function". text()/body/arrayBuffer are mutually-exclusive consumers of res.
+          arrayBuffer: async () => {
+            const chunks = [];
+            for await (const chunk of res) chunks.push(chunk);
+            const buf = Buffer.concat(chunks);
+            return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+          },
           json: async () => JSON.parse(await response.text()),
         };
         resolve(response);
       });
 
-      req.on("error", reject);
-      if (options.body) {
-        req.write(typeof options.body === "string" ? options.body : JSON.stringify(options.body));
+      req.on("error", fail);
+      if (options.body != null) {
+        req.write(serializeBypassRequestBody(options.body));
       }
       req.end();
     });
 
-    socket.on("error", reject);
+    socket.on("error", fail);
   });
 }
 
+// Bound the time-to-first-byte (connect → response headers) of an upstream call.
+// Without this a stalled upstream hangs the request forever, surfacing as the
+// client's own "API timeout" (e.g. Claude Code) instead of a clean 5xx here.
+// Cleared the moment headers arrive, so it never aborts a long-running stream body.
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 120000; // 2 min to first byte
+
+function withUpstreamTimeout(options) {
+  const ms = Number(options.timeoutMs ?? process.env.UPSTREAM_TIMEOUT_MS ?? DEFAULT_UPSTREAM_TIMEOUT_MS);
+  if (!Number.isFinite(ms) || ms <= 0 || typeof AbortSignal?.any !== "function") {
+    return { fetchOptions: options, done: () => {} };
+  }
+  const tc = new AbortController();
+  const timer = setTimeout(
+    () => tc.abort(new DOMException(`Upstream timeout: no response headers after ${ms}ms`, "TimeoutError")),
+    ms
+  );
+  if (typeof timer.unref === "function") timer.unref();
+  const signal = options.signal ? AbortSignal.any([options.signal, tc.signal]) : tc.signal;
+  return { fetchOptions: { ...options, signal }, done: () => clearTimeout(timer) };
+}
+
+/**
+ * Fetch that follows redirects manually, re-validating each hop's hostname
+ * against the SSRF guard. Without this, a validated initial host can 30x-redirect
+ * to a private/metadata address (e.g. 169.254.169.254) and the default
+ * redirect:"follow" would chase it, defeating assertSafeResolvedHostname.
+ */
+async function safeRedirectFetch(url, options, fetchImpl) {
+  let currentUrl = typeof url === "string" ? url : url.toString();
+  let currentOptions = { ...options, redirect: "manual" };
+
+  for (let hop = 0; hop <= MAX_UPSTREAM_REDIRECTS; hop++) {
+    const res = await fetchImpl(currentUrl, currentOptions);
+    // Only 3xx is a redirect; anything else (incl. undefined status from
+    // non-standard Response-likes) is handed back untouched.
+    const status = Number(res?.status);
+    if (!(status >= 300 && status < 400)) return res;
+
+    const location = res.headers?.get?.("location");
+    if (!location) return res; // 3xx without Location — hand back as-is
+
+    let nextUrl;
+    try {
+      nextUrl = new URL(location, currentUrl).toString();
+    } catch {
+      throw new Error("[ProxyFetch] Redirect to invalid URL blocked");
+    }
+
+    const nextHost = new URL(nextUrl).hostname;
+    const allowLoopback = ["localhost", "127.0.0.1", "::1"].includes(nextHost.toLowerCase());
+    try {
+      await assertSafeResolvedHostname(nextHost, { allowLoopback });
+    } catch (dnsError) {
+      throw new Error(`[ProxyFetch] Redirect blocked by SSRF guard: ${dnsError.message}`);
+    }
+
+    // Drain the redirect response body to free the socket before re-issuing.
+    try { await res.body?.cancel(); } catch { /* noop */ }
+
+    // Per fetch spec, 303 (and 301/302 for non-GET/HEAD) downgrade to GET and drop the body.
+    const method = (currentOptions.method || "GET").toUpperCase();
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method !== "GET" && method !== "HEAD")) {
+      const { body, ...rest } = currentOptions;
+      currentOptions = { ...rest, method: "GET" };
+    }
+    currentUrl = nextUrl;
+  }
+
+  throw new Error(`[ProxyFetch] Too many redirects (>${MAX_UPSTREAM_REDIRECTS})`);
+}
+
 export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
+  const { fetchOptions, done } = withUpstreamTimeout(options);
+  try {
+    return await _proxyAwareFetch(url, fetchOptions, proxyOptions);
+  } finally {
+    done(); // clear the TTFB timer once headers resolve (or on error) — stream body is unbounded
+  }
+}
+
+async function _proxyAwareFetch(url, options = {}, proxyOptions = null) {
   const targetUrl = typeof url === "string" ? url : url.toString();
 
-  // Vercel relay: forward request via relay headers
-  const vercelRelayUrl = normalizeString(proxyOptions?.vercelRelayUrl);
-  if (vercelRelayUrl) {
+  if (!shouldBypassMitmDns(targetUrl)) {
+    try {
+      const hostname = new URL(targetUrl).hostname;
+      const allowLoopback = ["localhost", "127.0.0.1", "::1"].includes(hostname.toLowerCase());
+      await assertSafeResolvedHostname(hostname, { allowLoopback });
+    } catch (dnsError) {
+      throw new Error(`[ProxyFetch] DNS safety check failed: ${dnsError.message}`);
+    }
+  }
+
+  const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
+  const envProxyUrl = connectionProxyUrl ? null : normalizeRuntimeProxyUrl(getEnvProxyUrl(targetUrl), "environment");
+  let proxyUrl = connectionProxyUrl || envProxyUrl;
+
+  // Vercel relay is lower precedence than per-connection proxy (AGENTS.md § outbound proxy routing)
+  const vercelRelayUrl = !connectionProxyUrl ? normalizeString(proxyOptions?.vercelRelayUrl) : null;
+  if (!proxyUrl && vercelRelayUrl) {
     const parsed = new URL(targetUrl);
     const relayHeaders = {
       ...options.headers,
       "x-relay-target": `${parsed.protocol}//${parsed.host}`,
       "x-relay-path": `${parsed.pathname}${parsed.search}`,
     };
+    const relayAuthSecret = normalizeString(proxyOptions?.relayAuthSecret);
+    if (relayAuthSecret) relayHeaders["x-relay-auth"] = relayAuthSecret;
     return originalFetch(vercelRelayUrl, { ...options, headers: relayHeaders });
   }
 
-  const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
-  const envProxyUrl = connectionProxyUrl ? null : normalizeProxyUrl(getEnvProxyUrl(targetUrl));
-  const proxyUrl = connectionProxyUrl || envProxyUrl;
-
   // MITM DNS bypass: for known MITM-intercepted hosts, resolve real IP to avoid DNS spoof
   if (shouldBypassMitmDns(targetUrl)) {
+    const parsedUrl = new URL(targetUrl);
     if (proxyUrl) {
       // Proxy resolves DNS externally (not affected by /etc/hosts) — use proxy directly
       try {
         const dispatcher = await getDispatcher(proxyUrl);
         return await originalFetch(url, { ...options, dispatcher });
       } catch (proxyError) {
-        if (proxyOptions?.strictProxy === true) {
-          throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
+        if (proxyOptions?.strictProxy === true || connectionProxyUrl) {
+          throw new Error(`[ProxyFetch] Proxy required but failed: ${proxyError.message}`);
         }
         console.warn(`[ProxyFetch] Proxy failed, falling back to direct bypass: ${proxyError.message}`);
       }
     }
-    // No proxy — manually resolve real IP to bypass DNS spoof
-    try {
-      const parsedUrl = new URL(targetUrl);
-      const realIP = await resolveRealIP(parsedUrl.hostname);
-      if (realIP) return await createBypassRequest(parsedUrl, realIP, options);
-    } catch (error) {
-      console.warn(`[ProxyFetch] MITM bypass failed: ${error.message}`);
+    // No proxy (or proxy failed) — external DNS + direct socket; never fall back to system DNS
+    const realIP = await resolveRealIP(parsedUrl.hostname);
+    if (!realIP) {
+      throw new Error(`[ProxyFetch] External DNS resolution failed for MITM bypass host: ${parsedUrl.hostname}`);
     }
+    return await createBypassRequest(parsedUrl, realIP, options);
   }
 
   if (proxyUrl) {
     try {
       const dispatcher = await getDispatcher(proxyUrl);
-      return await originalFetch(url, { ...options, dispatcher });
+      return await safeRedirectFetch(url, options, (u, o) => originalFetch(u, { ...o, dispatcher }));
     } catch (proxyError) {
-      // If strictProxy is enabled, fail hard instead of falling back to direct
-      if (proxyOptions?.strictProxy === true) {
-        throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
+      // Configured proxy (per-connection or environment) must not silently fall back to direct
+      if (proxyOptions?.strictProxy !== false) {
+        throw new Error(`[ProxyFetch] Proxy required but failed: ${proxyError.message}`);
       }
-      console.warn(`[ProxyFetch] Proxy failed, falling back to direct: ${proxyError.message}`);
-      return originalFetch(url, options);
+      console.warn(`[ProxyFetch] Proxy failed, falling back to direct (strictProxy=false): ${proxyError.message}`);
+      return safeRedirectFetch(url, options, originalFetch);
     }
   }
 
   // got-scraping disabled — use native fetch directly
   // (Re-enable per-host by wrapping with tryGotScrapingFetch when needed)
-  return originalFetch(url, options);
+  return safeRedirectFetch(url, options, originalFetch);
 }
 
 /**
@@ -366,3 +555,28 @@ if (globalThis.fetch !== patchedFetch) {
 }
 
 export default patchedFetch;
+
+/**
+ * Build proxy routing options from a connection credentials record (same shape as chatCore).
+ */
+export function buildProxyOptionsFromCredentials(credentials) {
+  const psd = credentials?.providerSpecificData || {};
+  return {
+    connectionProxyEnabled: psd.connectionProxyEnabled === true,
+    connectionProxyUrl: psd.connectionProxyUrl || "",
+    connectionNoProxy: psd.connectionNoProxy || "",
+    vercelRelayUrl: psd.vercelRelayUrl || "",
+    relayAuthSecret: psd.relayAuthSecret || "",
+    strictProxy: psd.strictProxy === true,
+  };
+}
+
+export {
+  resolveConnectionProxyUrl,
+  getEnvProxyUrl,
+  shouldBypassMitmDns,
+  shouldBypassByNoProxy,
+  normalizeProxyUrl,
+  resolveRealIP,
+  MITM_BYPASS_HOSTS,
+};
