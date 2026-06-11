@@ -72,6 +72,8 @@ const cachedTargetIPs = {};
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 async function resolveTargetIP(hostname) {
+  // Skip DNS for raw IPv4 addresses — dns.resolve4() throws ENOTFOUND on Node v26
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) return hostname;
   const cached = cachedTargetIPs[hostname];
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.ip;
   const resolver = new dns.Resolver();
