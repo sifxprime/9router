@@ -435,6 +435,7 @@ export const PROVIDERS = {
   longcat: { baseUrl: "https://api.longcat.chat/openai/v1/chat/completions", format: "openai" },
   puter: { baseUrl: "https://api.puter.com/puterai/openai/v1/chat/completions", format: "openai" },
   uncloseai: { baseUrl: "https://hermes.ai.unturf.com/v1/chat/completions", format: "openai", noAuth: true },
+  pollinations: { baseUrl: "https://gen.pollinations.ai/v1/chat/completions", format: "openai", noAuth: true },
   scaleway: { baseUrl: "https://api.scaleway.ai/v1/chat/completions", format: "openai" },
   deepinfra: { baseUrl: "https://api.deepinfra.com/v1/openai/chat/completions", format: "openai" },
   sambanova: { baseUrl: "https://api.sambanova.ai/v1/chat/completions", format: "openai" },

@@ -22,7 +22,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS } from "@/shared/constants/models";
-import { FREE_PROVIDERS } from "@/shared/constants/providers";
+import { AI_PROVIDERS } from "@/shared/constants/providers";
 
 function messageTextContainsSubagentCue(body) {
   const explicitSubagentRegex =
@@ -213,7 +213,7 @@ async function findAlternativeProviders(model, originalProvider, triedProviders)
 
   let freeProviders = new Set();
   try {
-    for (const [providerId, config] of Object.entries(FREE_PROVIDERS)) {
+    for (const [providerId, config] of Object.entries(AI_PROVIDERS)) {
       if (config.noAuth) freeProviders.add(providerId);
     }
   } catch {}

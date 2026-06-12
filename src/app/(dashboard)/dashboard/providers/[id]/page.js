@@ -131,7 +131,7 @@ export default function ProviderDetailPage() {
   const authModes = providerInfo?.authModes || [];
   const isOAuth = !!OAUTH_PROVIDERS[providerId] || !!FREE_PROVIDERS[providerId] || authModes.includes("oauth");
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
-  const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
+  const isFreeNoAuth = !!(FREE_PROVIDERS[providerId]?.noAuth || APIKEY_PROVIDERS[providerId]?.noAuth);
   const models = getModelsByProviderId(providerId);
   const providerAlias = getProviderAlias(providerId);
   
