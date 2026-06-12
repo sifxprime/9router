@@ -191,8 +191,8 @@ export class BaseExecutor {
       if (!headers["anthropic-version"]) {
         headers["anthropic-version"] = "2023-06-01";
       }
-    } else {
-      // Standard Bearer token auth for other providers
+    } else if (!this.noAuth) {
+      // Standard Bearer token auth for other providers (skip for noAuth)
       if (credentials.accessToken) {
         headers["Authorization"] = `Bearer ${credentials.accessToken}`;
       } else if (credentials.apiKey) {
