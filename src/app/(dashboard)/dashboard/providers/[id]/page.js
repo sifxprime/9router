@@ -55,6 +55,7 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [suggestedModels, setSuggestedModels] = useState([]);
+  const [liveModels, setLiveModels] = useState([]);
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
@@ -380,6 +381,18 @@ export default function ProviderDetailPage() {
     if (!fetcher) return;
     fetchSuggestedModels(fetcher).then(setSuggestedModels);
   }, [providerId]);
+
+  // Fetch live models from provider's authenticated API (using first available connection)
+  useEffect(() => {
+    const hasFetcher = !!(OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId])?.modelsFetcher;
+    if (hasFetcher || connections.length === 0) return;
+    const conn = connections.find(c => c.apiKey || c.accessToken);
+    if (!conn) return;
+    fetch(`/api/providers/${conn.id}/models`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.models?.length) setLiveModels(data.models); })
+      .catch(() => {});
+  }, [providerId, connections]);
 
   const handleSetAlias = async (modelId, alias, providerAliasOverride = providerAlias) => {
     const fullModel = `${providerAliasOverride}/${modelId}`;
@@ -1014,7 +1027,7 @@ export default function ProviderDetailPage() {
           if (notAdded.length === 0) return null;
           return (
             <div className="w-full mt-2">
-              <p className="text-xs text-text-muted mb-2">Suggested free models (≥200k context):</p>
+              <p className="text-xs text-text-muted mb-2">Suggested models ({notAdded.length}):</p>
               <div className="flex flex-wrap gap-2">
                 {notAdded.map((m) => (
                   <button
@@ -1028,6 +1041,37 @@ export default function ProviderDetailPage() {
                   >
                     <span className="material-symbols-outlined text-[13px]">add</span>
                     {m.id.split("/").pop()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Live models fetched from provider's authenticated API */}
+        {liveModels.length > 0 && (() => {
+          const addedFullModels = new Set(Object.values(modelAliases));
+          const hardcodedIds = new Set(models.map((m) => m.id));
+          const notAdded = liveModels.filter(
+            (m) => !addedFullModels.has(`${providerStorageAlias}/${m.id}`) && !hardcodedIds.has(m.id)
+          );
+          if (notAdded.length === 0) return null;
+          return (
+            <div className="w-full mt-2">
+              <p className="text-xs text-text-muted mb-2">Available models from API ({notAdded.length}):</p>
+              <div className="flex flex-wrap gap-2">
+                {notAdded.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={async () => {
+                      const alias = (m.id || "").split("/").pop();
+                      await handleSetAlias(m.id, alias, providerStorageAlias);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                    title={m.name || m.id}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">add</span>
+                    {(m.id || "").split("/").pop()}
                   </button>
                 ))}
               </div>
