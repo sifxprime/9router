@@ -9,6 +9,35 @@ import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
+// Hosts/IPs that must never be reached through a user-supplied baseUrl.
+// Self-hosted LLM servers on loopback/LAN are legitimate, so we deliberately
+// allow private-range addresses. We DO block cloud-metadata endpoints
+// (the actual SSRF jackpot) and 0.0.0.0/wildcard.
+const SSRF_BLOCKED_HOSTNAMES = new Set([
+  "169.254.169.254",     // AWS / Azure / GCP / OpenStack instance metadata
+  "169.254.170.2",       // AWS ECS task metadata
+  "100.100.100.200",     // Alibaba metadata
+  "metadata.google.internal",
+  "metadata",
+  "0.0.0.0",
+  "0",
+  "::",
+]);
+
+function assertSafeBaseUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); }
+  catch { throw new Error("Invalid base URL"); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Disallowed URL scheme: ${parsed.protocol}`);
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (SSRF_BLOCKED_HOSTNAMES.has(host)) {
+    throw new Error(`Blocked host (metadata/wildcard): ${host}`);
+  }
+  return parsed;
+}
+
 const parseOpenAIStyleModels = (data) => {
   if (Array.isArray(data)) return data;
   return data?.data || data?.models || data?.results || [];
@@ -413,6 +442,8 @@ export async function GET(request, { params }) {
       if (!baseUrl) {
         return NextResponse.json({ error: "No base URL configured for OpenAI compatible provider" }, { status: 400 });
       }
+      try { assertSafeBaseUrl(baseUrl); }
+      catch (e) { return NextResponse.json({ error: e.message }, { status: 400 }); }
       const url = `${baseUrl.replace(/\/$/, "")}/models`;
       const response = await fetch(url, {
         method: "GET",
@@ -446,6 +477,8 @@ export async function GET(request, { params }) {
       if (!baseUrl) {
         return NextResponse.json({ error: "No base URL configured for Anthropic compatible provider" }, { status: 400 });
       }
+      try { assertSafeBaseUrl(baseUrl); }
+      catch (e) { return NextResponse.json({ error: e.message }, { status: 400 }); }
 
       baseUrl = baseUrl.replace(/\/$/, "");
       if (baseUrl.endsWith("/messages")) {
