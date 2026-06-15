@@ -169,6 +169,40 @@ export async function updateProviderConnection(id, data) {
   return result;
 }
 
+/**
+ * Compute-and-write update inside a single transaction.
+ *
+ * Use when the update *depends on the current row value* (read-modify-write).
+ * Plain updateProviderConnection() reads stale snapshots outside any tx, so
+ * two concurrent callers can both read N and both write N+1 instead of N+2.
+ * This variant runs the read AND the compute inside the tx — better-sqlite3's
+ * synchronous transactions guarantee no other writer interleaves.
+ *
+ * @param {string} id - Connection id
+ * @param {(existing:object)=>object|null} computeUpdates - Receives the
+ *   current row as an object; return the update patch, or null to skip the
+ *   write entirely. The function MUST be synchronous — async work inside a
+ *   sync transaction would break atomicity.
+ * @returns {Promise<object|null>} Merged row after write, or the existing
+ *   row when computeUpdates returned null, or null if the row was missing.
+ */
+export async function updateProviderConnectionAtomic(id, computeUpdates) {
+  const db = await getAdapter();
+  let result;
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) { result = null; return; }
+    const existing = rowToConn(row);
+    const updates = computeUpdates(existing);
+    if (updates == null) { result = existing; return; }
+    const merged = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+    upsert(db, merged);
+    if (updates.priority !== undefined) reorderInTx(db, existing.provider);
+    result = merged;
+  });
+  return result;
+}
+
 export async function deleteProviderConnection(id) {
   const db = await getAdapter();
   let ok = false;

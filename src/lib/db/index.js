@@ -10,7 +10,7 @@ export {
 // Provider connections
 export {
   getProviderConnections, getProviderConnectionById,
-  createProviderConnection, updateProviderConnection,
+  createProviderConnection, updateProviderConnection, updateProviderConnectionAtomic,
   deleteProviderConnection, deleteProviderConnectionsByProvider,
   reorderProviderConnections, cleanupProviderConnections,
 } from "./repos/connectionsRepo.js";

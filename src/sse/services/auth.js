@@ -1,4 +1,4 @@
-import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings } from "@/lib/localDb";
+import { getProviderConnections, validateApiKey, updateProviderConnection, updateProviderConnectionAtomic, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
@@ -202,42 +202,56 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  */
 export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
-  const connections = await getProviderConnections({ provider });
-  const conn = connections.find(c => c.id === connectionId);
-  const backoffLevel = conn?.backoffLevel || 0;
-
-  // Provider-specific precise cooldown (e.g. codex usage_limit_reached resets_at) overrides backoff
-  let shouldFallback, cooldownMs, newBackoffLevel;
-  if (resetsAtMs && resetsAtMs > Date.now()) {
-    shouldFallback = true;
-    cooldownMs = Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
-    newBackoffLevel = 0;
-  } else {
-    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
-  }
-  if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
   const reason = typeof errorText === "string" ? errorText.slice(0, 100) : "Provider error";
-  const lockUpdate = buildModelLockUpdate(model, cooldownMs);
 
-  await updateProviderConnection(connectionId, {
-    ...lockUpdate,
-    testStatus: "unavailable",
-    lastError: reason,
-    errorCode: status,
-    lastErrorAt: new Date().toISOString(),
-    backoffLevel: newBackoffLevel ?? backoffLevel
+  // Captured by the atomic compute callback so we can return them to the caller.
+  let outcome = { shouldFallback: false, cooldownMs: 0 };
+  let lockKey = null;
+  let connName = connectionId.slice(0, 8);
+
+  const merged = await updateProviderConnectionAtomic(connectionId, (existing) => {
+    // Read backoffLevel inside the transaction — fixes the read-modify-write race
+    // where two concurrent failures both read level N and both wrote level N+1.
+    const backoffLevel = existing?.backoffLevel || 0;
+    connName = existing?.displayName || existing?.name || existing?.email || connName;
+
+    let shouldFallback, cooldownMs, newBackoffLevel;
+    if (resetsAtMs && resetsAtMs > Date.now()) {
+      shouldFallback = true;
+      cooldownMs = Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
+      newBackoffLevel = 0;
+    } else {
+      ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
+    }
+
+    if (!shouldFallback) {
+      outcome = { shouldFallback: false, cooldownMs: 0 };
+      return null; // no DB write
+    }
+
+    const lockUpdate = buildModelLockUpdate(model, cooldownMs);
+    lockKey = Object.keys(lockUpdate)[0];
+    outcome = { shouldFallback: true, cooldownMs };
+
+    return {
+      ...lockUpdate,
+      testStatus: "unavailable",
+      lastError: reason,
+      errorCode: status,
+      lastErrorAt: new Date().toISOString(),
+      backoffLevel: newBackoffLevel ?? backoffLevel,
+    };
   });
 
-  const lockKey = Object.keys(lockUpdate)[0];
-  const connName = conn?.displayName || conn?.name || conn?.email || connectionId.slice(0, 8);
-  log.warn("AUTH", `${connName} locked ${lockKey} for ${Math.round(cooldownMs / 1000)}s [${status}]`);
-
-  if (provider && status && reason) {
-    console.error(`❌ ${provider} [${status}]: ${reason}`);
+  if (merged && outcome.shouldFallback) {
+    log.warn("AUTH", `${connName} locked ${lockKey} for ${Math.round(outcome.cooldownMs / 1000)}s [${status}]`);
+    if (provider && status && reason) {
+      console.error(`❌ ${provider} [${status}]: ${reason}`);
+    }
   }
 
-  return { shouldFallback: true, cooldownMs };
+  return outcome;
 }
 
 /**
