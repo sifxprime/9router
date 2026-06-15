@@ -22,6 +22,26 @@
 
 ---
 
+## 🔧 About this fork — `sifxprime/9router`
+
+This is a hardened fork of the upstream **[decolua/9router](https://github.com/decolua/9router)** maintained at **[sifxprime/9router](https://github.com/sifxprime/9router)**.
+
+It tracks upstream but adds an audited security + stability layer focused on production reliability when 9Router is exposed via tunnel (Cloudflare, Tailscale) or used under concurrent multi-agent load. **Eleven audit findings closed across nine atomic commits**, each with reproducing unit tests and live end-to-end verification before commit.
+
+| Area | Hardening in this fork |
+|---|---|
+| MITM stream layer | Upstream HTTP error → parseable Kiro `exception` frame instead of `"Truncated event message received"`. Read-loop guarded against socket hang-up. EventStream encoder bounds-checked (name ≤ 255, value ≤ 65 535, frame ≤ 16 MiB) to prevent silent frame corruption. |
+| Auth & sessions | Token refresh no longer mutates caller credentials under concurrency. Post-refresh retry always adopts its own response (no stale-401 masking). Timing-safe CLI token compare. Per-IP brute-force lockout for API-key + CLI-token paths. |
+| Account fallback | `backoffLevel` read-modify-write made atomic via SQLite transaction — concurrent failures no longer lose increments and stall exponential backoff. |
+| Provider SSRF | `GET /api/providers/[id]/models` validates user-supplied `baseUrl`: blocks cloud metadata endpoints (169.254.169.254, ECS, GCP, Alibaba) + non-`http(s)` schemes. Loopback and private LAN ranges remain allowed for legitimate self-hosted LLMs. |
+| Combo routing | Recursion depth guard (max 3) prevents infinite loops on misconfigured combo-of-combo cycles. Single `getSettings()` DB read per request (was 2–3). |
+
+See [CHANGELOG.md](./CHANGELOG.md) entry `v0.4.80+sifxprime.1` for the full commit log with one-line summaries. Each finding's reproduction + verification approach is recorded in the commit body.
+
+Upstream features, providers, docs, and roadmap remain authoritative — credit and stars belong to **[@decolua](https://github.com/decolua)** and the upstream contributors.
+
+---
+
 ## 🤔 Why 9Router?
 
 **Stop wasting money, tokens and hitting limits:**
@@ -1308,6 +1328,7 @@ Thanks to all contributors who helped make 9Router better!
 
 Built on the shoulders of giants:
 
+- **[decolua/9router](https://github.com/decolua/9router)** — the upstream project that this fork tracks. All core architecture, providers, dashboard, and ongoing feature work are authored upstream. This fork only adds the security + stability hardening described in the [About this fork](#-about-this-fork--sifxprime9router) section.
 - **[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)** — original Go implementation that inspired this JavaScript port.
 - **[RTK](https://github.com/rtk-ai/rtk)** ![Stars](https://img.shields.io/github/stars/rtk-ai/rtk?style=flat&color=yellow) — Rust token-saver. 9Router ports its compression pipeline to JS → **−20-40% input tokens** on every request.
 - **[Caveman](https://github.com/JuliusBrussee/caveman)** ![Stars](https://img.shields.io/github/stars/JuliusBrussee/caveman?style=flat&color=yellow) by **[@JuliusBrussee](https://github.com/JuliusBrussee)** — viral *"why use many token when few token do trick"*. 9Router adapts its prompt → **−65% output tokens**.
