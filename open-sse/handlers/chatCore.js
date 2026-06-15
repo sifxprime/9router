@@ -221,12 +221,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       const newCredentials = await refreshWithRetry(() => executor.refreshCredentials(credentials, log), 3, log);
       if (newCredentials?.accessToken || newCredentials?.copilotToken) {
         log?.info?.("TOKEN", `${provider.toUpperCase()} | refreshed`);
-        Object.assign(credentials, newCredentials);
+        // Immutable update — never mutate the caller's credentials object.
+        // Concurrent requests sharing the same reference must not see each other's tokens.
+        const updatedCredentials = { ...credentials, ...newCredentials };
         if (onCredentialsRefreshed) {
           try { await onCredentialsRefreshed(newCredentials); } catch (e) { log?.warn?.("TOKEN", `onCredentialsRefreshed failed: ${e.message}`); }
         }
         try {
-          const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions });
+          const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials: updatedCredentials, signal: streamController.signal, log, proxyOptions });
           if (retryResult.response.ok) { providerResponse = retryResult.response; providerUrl = retryResult.url; }
         } catch { log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`); }
       } else {
