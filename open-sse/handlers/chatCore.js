@@ -229,8 +229,24 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         }
         try {
           const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials: updatedCredentials, signal: streamController.signal, log, proxyOptions });
-          if (retryResult.response.ok) { providerResponse = retryResult.response; providerUrl = retryResult.url; }
-        } catch { log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`); }
+          // Always adopt the retry result — even on non-ok. The retry's error is
+          // the real reason the user's request failed; the original 401 body is
+          // stale and was only ever a refresh trigger. Downstream parseUpstreamError
+          // will surface this fresher error to the client.
+          providerResponse = retryResult.response;
+          providerUrl = retryResult.url;
+          if (!providerResponse.ok) {
+            log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh still failed: ${providerResponse.status}`);
+          }
+        } catch (retryErr) {
+          log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh threw: ${retryErr.message}`);
+          // Synthesize a response so downstream error handling surfaces the
+          // actual cause instead of the stale 401.
+          providerResponse = new Response(
+            JSON.stringify({ error: { message: `Retry after token refresh threw: ${retryErr.message}`, type: "retry_exception" } }),
+            { status: HTTP_STATUS.BAD_GATEWAY, headers: { "Content-Type": "application/json" } }
+          );
+        }
       } else {
         log?.warn?.("TOKEN", `${provider.toUpperCase()} | refresh failed`);
       }
