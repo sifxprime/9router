@@ -94,12 +94,23 @@ Result: Never stop coding, minimal cost + 20-40% token savings via RTK
 
 > The npm package `9router` and the Docker image `decolua/9router` are still the **upstream** project. To get this fork's hardening pass + Kiro Google/GitHub OAuth, install from source as shown below.
 
-### TL;DR — paste this into a terminal
+### TL;DR — run these four commands one at a time
+
+> Press **Enter after each line**. Windows CMD/PowerShell will not split a single pasted block into separate commands and will treat `git clone …\n cd 9router` as one — you'll see `Repository not found` because Git tries to clone a URL with `cd` appended.
 
 ```bash
 git clone https://github.com/sifxprime/9router.git
+```
+
+```bash
 cd 9router
+```
+
+```bash
 npm install
+```
+
+```bash
 npm run dev
 ```
 
@@ -197,6 +208,20 @@ docker run -d -p 20128:20128 -v ~/.9router:/root/.9router decolua/9router:latest
 - OpenAI-compatible API: `http://localhost:20128/v1`
 - Anthropic-compatible API: `http://localhost:20128/v1/messages`
 - Health probe: `http://localhost:20128/api/health`
+
+### Platform support — honest status
+
+This fork's changes are pure cross-platform JavaScript and re-use upstream's per-OS cert/DNS install code. Here is what is actually verified vs what should work but I haven't personally driven on every OS:
+
+| OS | Pure router mode (chat completions) | MITM mode (Kiro / Antigravity / Copilot IDE intercept) |
+|---|---|---|
+| **macOS** (Intel + Apple Silicon) | ✅ verified in development | ✅ Kiro driven live, end-to-end |
+| **Linux** (Debian / Ubuntu / Arch / Fedora / RHEL / openSUSE) | ✅ pure-JS, high confidence | ⚠️ untested by me; upstream's distro-aware `update-ca-certificates` / `update-ca-trust` path is in place |
+| **Windows** 10 / 11 | ✅ pure-JS, high confidence | ⚠️ untested by me; upstream's elevated PowerShell + `certutil -addstore -f Root` path is in place |
+
+**MITM mode should work on all three** — Antigravity, Copilot, and Kiro share the same hardened pipe layer (`base.js`) that I verified live. Upstream already supports Windows + Linux cert install via the OS-aware code in `src/mitm/cert/install.js`. If MITM fails on Windows/Linux, the most likely cause is the OS-level cert-install/UAC flow (upstream territory), not anything this fork touched.
+
+If you hit anything OS-specific, [open an issue](https://github.com/sifxprime/9router/issues) — I'll try to repro and patch.
 
 ---
 
