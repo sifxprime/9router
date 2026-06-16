@@ -216,10 +216,12 @@ This fork's changes are pure cross-platform JavaScript and re-use upstream's per
 | OS | Pure router mode (chat completions) | MITM mode (Kiro / Antigravity / Copilot IDE intercept) |
 |---|---|---|
 | **macOS** (Intel + Apple Silicon) | ✅ verified in development | ✅ Kiro driven live, end-to-end |
-| **Linux** (Debian / Ubuntu / Arch / Fedora / RHEL / openSUSE) | ✅ pure-JS, high confidence | ⚠️ untested by me; upstream's distro-aware `update-ca-certificates` / `update-ca-trust` path is in place |
-| **Windows** 10 / 11 | ✅ pure-JS, high confidence | ⚠️ untested by me; upstream's elevated PowerShell + `certutil -addstore -f Root` path is in place |
+| **Windows** 10 / 11 | ✅ verified by a fork user | ✅ confirmed by a fork user: Antigravity streamed `gemini-pro-agent` end-to-end through MITM, 10.6 s, complete, no errors. Cert install via elevated PowerShell + `certutil -addstore -f Root` works as upstream ships it. |
+| **Linux** (Debian / Ubuntu / Arch / Fedora / RHEL / openSUSE) | ✅ pure-JS, high confidence | ⚠️ untested as of now; upstream's distro-aware `update-ca-certificates` / `update-ca-trust` path is in place and the same JS runs everywhere |
 
-**MITM mode should work on all three** — Antigravity, Copilot, and Kiro share the same hardened pipe layer (`base.js`) that I verified live. Upstream already supports Windows + Linux cert install via the OS-aware code in `src/mitm/cert/install.js`. If MITM fails on Windows/Linux, the most likely cause is the OS-level cert-install/UAC flow (upstream territory), not anything this fork touched.
+**MITM mode is confirmed on macOS and Windows** — Antigravity, Copilot, and Kiro share the same hardened pipe layer (`base.js`) that I verified live. Upstream already supports the Linux distro families above via the OS-aware code in `src/mitm/cert/install.js`. If MITM fails on Linux, the most likely cause is the OS-level cert-install flow (upstream territory), not anything this fork touched.
+
+**Windows note:** MITM requires an elevated process (binds `:443`, edits `C:\Windows\System32\drivers\etc\hosts`, installs the root CA). Launch your CMD or PowerShell as **Run as administrator**, then `cd` into the project and run `npm run dev`. The dashboard will hide the "Administrator required" banner once `net session` succeeds inside the dev server's Node process.
 
 If you hit anything OS-specific, [open an issue](https://github.com/sifxprime/9router/issues) — I'll try to repro and patch.
 
