@@ -37,7 +37,14 @@ export default function RootLayout({ children }) {
           }}
         />
       </head>
-      <body className={`${inter.variable} font-sans antialiased`}>
+      {/* suppressHydrationWarning silences the one-level mismatch caused by browser
+          extensions (Grammarly, LastPass, ColorZilla, etc.) that inject attributes
+          like `data-gr-ext-installed` / `data-new-gr-c-s-check-loaded` into <body>
+          before React hydrates. The mismatch is cosmetic — React ignores the
+          unknown attributes — but the dev overlay surfaces a noisy warning we
+          can't act on (it's the user's extension, not our code). Matches the
+          same prop already on <html> above. */}
+      <body className={`${inter.variable} font-sans antialiased`} suppressHydrationWarning>
         <ThemeProvider>
           <RuntimeI18nProvider>
             {children}
