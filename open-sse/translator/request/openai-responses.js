@@ -176,6 +176,14 @@ export function openaiResponsesToOpenAIRequest(model, body, stream, credentials)
   }
 
   // Cleanup Responses API specific fields
+  // The Responses API uses `max_output_tokens`; the Chat Completions API
+  // upstream uses `max_tokens`. Map and delete so the upstream provider
+  // doesn't receive an unknown field. (port of upstream aba4c45)
+  if (result.max_output_tokens !== undefined) {
+    if (result.max_tokens === undefined) result.max_tokens = result.max_output_tokens;
+    delete result.max_output_tokens;
+  }
+
   delete result.input;
   delete result.instructions;
   delete result.include;

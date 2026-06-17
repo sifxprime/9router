@@ -95,7 +95,11 @@ function convertGeminiContent(content) {
 
     if (part.functionCall) {
       toolCalls.push({
-        id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        // Gemini lacks a native call id; derive a deterministic one from the function
+        // name so the matching functionResponse below produces the same tool_call_id.
+        // Without this, providers reject the follow-up tool message with a 400
+        // because the random id never matches. (port of upstream aba4c45)
+        id: part.functionCall.id || `call_${part.functionCall.name}`,
         type: "function",
         function: {
           name: part.functionCall.name,
@@ -107,7 +111,8 @@ function convertGeminiContent(content) {
     if (part.functionResponse) {
       return {
         role: "tool",
-        tool_call_id: part.functionResponse.id || part.functionResponse.name,
+        // Mirror the same deterministic id shape so functionCall ↔ functionResponse pair.
+        tool_call_id: part.functionResponse.id || `call_${part.functionResponse.name}`,
         content: JSON.stringify(part.functionResponse.response?.result || part.functionResponse.response || {})
       };
     }

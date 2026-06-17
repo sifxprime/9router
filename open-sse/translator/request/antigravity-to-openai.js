@@ -164,7 +164,12 @@ function convertContent(content) {
     // Function call
     if (part.functionCall) {
       toolCalls.push({
-        id: part.functionCall.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        // Deterministic id from the function name: Antigravity (Gemini) doesn't always
+        // emit a call id, but the matching functionResponse in the next turn references
+        // the same function name. A random id here would never pair on the way back, so
+        // the downstream OpenAI executor rejected the tool result with a 400.
+        // (port of upstream aba4c45)
+        id: part.functionCall.id || `call_${part.functionCall.name}`,
         type: "function",
         function: {
           name: part.functionCall.name,
@@ -177,7 +182,8 @@ function convertContent(content) {
     if (part.functionResponse) {
       toolResults.push({
         role: "tool",
-        tool_call_id: part.functionResponse.id || part.functionResponse.name,
+        // Mirror the same deterministic id shape so functionCall ↔ functionResponse pair.
+        tool_call_id: part.functionResponse.id || `call_${part.functionResponse.name}`,
         content: JSON.stringify(part.functionResponse.response?.result || part.functionResponse.response || {})
       });
     }
