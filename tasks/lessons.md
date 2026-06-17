@@ -9,3 +9,6 @@ Edit freely — add, remove, reword. These are YOUR rules.
 ## 2026-06-17
 
 - so check and find end to end bugs please don't do any mistake from our krouter every name belongs 9router from project is changed? and fresh new user not seeing old 9router anything? and on dashboard 9 Router Have Icon. Kodelyth Mark Icon then KROUTER and below version. make it publish on git and np
+## 2026-06-17
+
+- so check and find end to end bugs please don't do any mistake from our krouter every name belongs 9router from project is changed? and fresh new user not seeing old 9router anything? and on dashboard 9 Router Have Icon. Kodelyth Mark Icon then KROUTER and below version. make it publish on git and np
