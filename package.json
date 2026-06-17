@@ -1,7 +1,7 @@
 {
-  "name": "9router-app",
-  "version": "0.4.80",
-  "description": "9Router web dashboard",
+  "name": "krouter-app",
+  "version": "0.5.0",
+  "description": "kRouter (Kodelyth Router) web dashboard — Kodelyth AI Infrastructure",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --port 20128",
