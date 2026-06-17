@@ -1,4 +1,4 @@
-import { Inter } from "next/font/google";
+import { Inter, Space_Grotesk } from "next/font/google";
 import "material-symbols/outlined.css";
 import "./globals.css";
 import { ThemeProvider } from "@/shared/components/ThemeProvider";
@@ -13,6 +13,16 @@ initConsoleLogCapture();
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+});
+
+// Space Grotesk is the Kodelyth brand display font. Used for the kRouter
+// wordmark in the sidebar + login page; loaded with weights 500/600/700 so
+// the same family can drive both medium-weight UI labels and bold marks.
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-space-grotesk",
+  display: "swap",
 });
 
 export const metadata = {
@@ -44,7 +54,7 @@ export default function RootLayout({ children }) {
           unknown attributes — but the dev overlay surfaces a noisy warning we
           can't act on (it's the user's extension, not our code). Matches the
           same prop already on <html> above. */}
-      <body className={`${inter.variable} font-sans antialiased`} suppressHydrationWarning>
+      <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased`} suppressHydrationWarning>
         <ThemeProvider>
           <RuntimeI18nProvider>
             {children}

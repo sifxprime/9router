@@ -144,7 +144,26 @@ export default function LoginPage() {
       <div className="landing-grid absolute inset-0 pointer-events-none" aria-hidden="true" />
       <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary mb-2">kRouter</h1>
+          {/* Brand block: Kodelyth Mark tile (white-on-orange) + Space Grotesk wordmark */}
+          <div className="inline-flex items-center gap-3 mb-3">
+            <div className="flex items-center justify-center size-11 rounded-[12px] bg-gradient-to-br from-brand-500 to-brand-700 shadow-[var(--shadow-warm)]">
+              <svg viewBox="0 0 400 400" className="size-[26px]" aria-hidden="true">
+                <g fill="none" stroke="#ffffff" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="128,104 184,200 128,296" strokeWidth="28" strokeOpacity="0.25" />
+                  <polyline points="172,100 260,200 172,300" strokeWidth="52" />
+                </g>
+              </svg>
+            </div>
+            <h1
+              className="text-3xl font-bold text-text-main"
+              style={{
+                fontFamily: "var(--font-display)",
+                letterSpacing: "-0.015em",
+              }}
+            >
+              kRouter
+            </h1>
+          </div>
           <p className="text-text-muted">
             {authMode === "oidc" && oidcConfigured
               ? "Sign in with your OIDC provider to access the dashboard"

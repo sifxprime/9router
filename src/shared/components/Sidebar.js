@@ -114,17 +114,33 @@ export default function Sidebar({ onClose }) {
           <div className="w-3 h-3 rounded-full bg-[#27C93F]" />
         </div>
 
-        {/* Logo */}
+        {/* Logo — Kodelyth Mark on brand-gradient tile + Space Grotesk wordmark */}
         <div className="px-6 py-4 flex flex-col gap-2">
-          <Link href="/dashboard" className="flex items-center gap-3">
-            <div className="flex items-center justify-center size-9 rounded-[10px] bg-gradient-to-br from-brand-500 to-brand-700 shadow-[var(--shadow-warm)]">
-              <span className="material-symbols-outlined text-white text-[20px]">hub</span>
+          <Link href="/dashboard" className="flex items-center gap-3 group">
+            <div className="flex items-center justify-center size-9 rounded-[10px] bg-gradient-to-br from-brand-500 to-brand-700 shadow-[var(--shadow-warm)] transition-transform group-hover:scale-[1.03]">
+              {/* Kodelyth Mark — solid chevron forward + ghost trail behind,
+                  recolored white for use on the orange brand tile (matches the
+                  white-on-dark variant in /brand/kodelyth-dark.svg). */}
+              <svg viewBox="0 0 400 400" className="size-[22px]" aria-hidden="true">
+                <g fill="none" stroke="#ffffff" strokeLinecap="round" strokeLinejoin="round">
+                  {/* ghost — recessed trail */}
+                  <polyline points="128,104 184,200 128,296" strokeWidth="28" strokeOpacity="0.25" />
+                  {/* solid — primary mark */}
+                  <polyline points="172,100 260,200 172,300" strokeWidth="52" />
+                </g>
+              </svg>
             </div>
-            <div className="flex flex-col">
-              <h1 className="text-lg font-semibold tracking-tight text-text-main">
+            <div className="flex flex-col leading-none">
+              <h1
+                className="text-[17px] font-bold text-text-main"
+                style={{
+                  fontFamily: "var(--font-display)",
+                  letterSpacing: "-0.01em",
+                }}
+              >
                 {APP_CONFIG.name}
               </h1>
-              <span className="text-xs text-text-muted">v{APP_CONFIG.version}</span>
+              <span className="text-[11px] text-text-muted mt-[3px] font-medium tabular-nums">v{APP_CONFIG.version}</span>
             </div>
           </Link>
           {updateInfo && (

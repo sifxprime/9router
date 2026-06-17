@@ -196,6 +196,11 @@ select {
 
   /* Font - Inter primary, Apple system fallback */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+
+  /* Kodelyth brand display font — Space Grotesk for wordmarks/headers. The
+     --font-space-grotesk variable is set by next/font/google in layout.js;
+     this alias lets components reach it via the Tailwind utility `font-display`. */
+  --font-display: var(--font-space-grotesk), 'Space Grotesk', 'Inter', system-ui, sans-serif;
 }
 
 /* Base */
