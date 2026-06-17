@@ -28,14 +28,18 @@ const readConfig = async () => {
   }
 };
 
+// Connections wrote with name "9Router" pre-rebrand and "kRouter" after. Match BOTH on read
+// so an existing user's connection is still detected without forcing them to reconnect.
+const isOurEntry = (entry) => entry.name === "kRouter" || entry.name === "9Router";
+
 const has9RouterConfig = (config) => {
   if (!Array.isArray(config)) return false;
-  return config.some((entry) => entry.name === "9Router");
+  return config.some(isOurEntry);
 };
 
 const get9RouterEntry = (config) => {
   if (!Array.isArray(config)) return null;
-  return config.find((entry) => entry.name === "9Router") || null;
+  return config.find(isOurEntry) || null;
 };
 
 // GET - Read current copilot config
@@ -82,7 +86,7 @@ export async function POST(request) {
     const keyToUse = apiKey || "sk_9router";
 
     const newEntry = {
-      name: "9Router",
+      name: "kRouter",
       vendor: "azure",
       apiKey: keyToUse,
       models: models.map((id) => ({
@@ -96,8 +100,8 @@ export async function POST(request) {
       })),
     };
 
-    // Replace existing 9Router entry or append
-    const idx = config.findIndex((e) => e.name === "9Router");
+    // Replace existing entry (matching either legacy "9Router" or current "kRouter") or append
+    const idx = config.findIndex(isOurEntry);
     if (idx >= 0) {
       config[idx] = newEntry;
     } else {
@@ -134,7 +138,8 @@ export async function DELETE() {
       throw error;
     }
 
-    config = config.filter((e) => e.name !== "9Router");
+    // Drop entries matching either legacy "9Router" or current "kRouter"
+    config = config.filter((e) => !isOurEntry(e));
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
 
     return NextResponse.json({

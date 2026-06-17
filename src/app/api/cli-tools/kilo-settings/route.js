@@ -92,7 +92,7 @@ export async function POST(request) {
     // Best-effort: update VS Code extension settings
     try {
       const vscode = (await readJson(getVscodeSettingsPath())) || {};
-      vscode["kilocode.customProvider"] = { name: "9Router", baseURL: normalizedBaseUrl, apiKey };
+      vscode["kilocode.customProvider"] = { name: "kRouter", baseURL: normalizedBaseUrl, apiKey };
       vscode["kilocode.defaultModel"] = model;
       await fs.writeFile(getVscodeSettingsPath(), JSON.stringify(vscode, null, 2));
     } catch { /* VS Code settings not writable */ }

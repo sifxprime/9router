@@ -136,7 +136,7 @@ export async function POST(request) {
     // Ensure /v1 suffix is added only once
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
     setNestedSection(parsed, "model_providers.9router", {
-      name: "9Router",
+      name: "kRouter",
       base_url: normalizedBaseUrl,
       wire_api: "responses",
     });
