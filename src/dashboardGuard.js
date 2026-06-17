@@ -106,6 +106,13 @@ function isLoopbackHostname(h) {
 }
 
 export function isLocalRequest(request) {
+  // Stamped by custom-server.js when client-supplied forwarding headers were
+  // present: the request came through a reverse proxy, so the loopback socket
+  // is the proxy hop — not the end-user. Trusting "local" here would bypass
+  // both our auth-attempt rate limiter (Bug 10 in this fork) and the public
+  // /v1 API-key check.
+  if (request.headers.get("x-9r-via-proxy")) return false;
+
   if (!isLoopbackHostname(request.headers.get("host"))) return false;
   const origin = request.headers.get("origin");
   if (origin) {
