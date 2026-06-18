@@ -54,19 +54,26 @@ const readSettings = async () => {
   }
 };
 
-// Check if settings has 9Router config
-const has9RouterConfig = (settings) => {
-  if (!settings || !settings.models || !settings.models.providers) return false;
-  return !!settings.models.providers["9router"];
-};
+// Provider key in OpenClaw's openclaw.json. "krouter" is canonical; "9router"
+// is read as a fallback for pre-rename configs and removed on next write.
+const PROVIDER_KEY = "krouter";
+const LEGACY_PROVIDER_KEY = "9router";
+const MODEL_PREFIX = "krouter/";
+const MODEL_PREFIX_RE = /^(?:krouter|9router)\//;
 
-// Read per-agent models.json and return current model id (without "9router/" prefix)
+const getProviderEntry = (providers) => (
+  providers?.[PROVIDER_KEY] ?? providers?.[LEGACY_PROVIDER_KEY] ?? null
+);
+
+const hasKRouterConfig = (settings) => !!getProviderEntry(settings?.models?.providers);
+
+// Read per-agent models.json and return current model id (without "krouter/" prefix)
 const readAgentModel = async (agentDir) => {
   try {
     const modelsPath = path.join(agentDir, "models.json");
     const content = await fs.readFile(modelsPath, "utf-8");
     const data = JSON.parse(content);
-    const models = data?.providers?.["9router"]?.models;
+    const models = getProviderEntry(data?.providers)?.models;
     return models?.[0]?.id || null;
   } catch {
     return null;
@@ -103,7 +110,8 @@ export async function GET() {
       installed: true,
       settings,
       agents: enrichedAgents,
-      has9Router: has9RouterConfig(settings),
+      hasKRouter: hasKRouterConfig(settings),
+      has9Router: hasKRouterConfig(settings), // legacy field name kept for UIs not yet updated
       settingsPath: getOpenClawSettingsPath(),
     });
   } catch (error) {
@@ -123,12 +131,13 @@ const writeAgentModels = async (agentDir, model, baseUrl, apiKey) => {
   } catch { /* No existing */ }
 
   if (!existing.providers) existing.providers = {};
-  existing.providers["9router"] = {
+  existing.providers[PROVIDER_KEY] = {
     baseUrl,
     apiKey: apiKey || "your_api_key",
     api: "openai-completions",
     models: [{ id: model, name: model.split("/").pop() || model }],
   };
+  delete existing.providers[LEGACY_PROVIDER_KEY];
   await fs.writeFile(modelsPath, JSON.stringify(existing, null, 2));
 };
 
@@ -161,11 +170,11 @@ export async function POST(request) {
     if (!settings.models.providers) settings.models.providers = {};
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const fullModelId = `9router/${model}`;
+    const fullModelId = `${MODEL_PREFIX}${model}`;
 
-    // Remove all old 9router/* entries from agents.defaults.models
+    // Remove all old krouter/* and legacy 9router/* entries from agents.defaults.models
     Object.keys(settings.agents.defaults.models)
-      .filter((k) => k.startsWith("9router/"))
+      .filter((k) => MODEL_PREFIX_RE.test(k))
       .forEach((k) => { delete settings.agents.defaults.models[k]; });
 
     // Update default model
@@ -175,16 +184,16 @@ export async function POST(request) {
     const allModelIds = new Set([model]);
     Object.values(agentModels).forEach((m) => { if (m) allModelIds.add(m); });
 
-    // Add fresh 9router models to allowlist
+    // Add fresh krouter models to allowlist
     allModelIds.forEach((m) => {
-      settings.agents.defaults.models[`9router/${m}`] = {};
+      settings.agents.defaults.models[`${MODEL_PREFIX}${m}`] = {};
     });
 
-    // Remove old 9router model from each agent in agents.list. The
+    // Remove old krouter/legacy 9router model from each agent in agents.list. The
     // model field may be a plain string or `{ primary, fallbacks }`.
     if (settings.agents.list) {
       settings.agents.list = settings.agents.list.map((agent) => {
-        if (resolveAgentModel(agent.model).startsWith("9router/")) {
+        if (MODEL_PREFIX_RE.test(resolveAgentModel(agent.model))) {
           const { model: _, ...rest } = agent;
           return rest;
         }
@@ -192,19 +201,20 @@ export async function POST(request) {
       });
     }
 
-    // Update models.providers.9router with all models
-    settings.models.providers["9router"] = {
+    // Update models.providers under new key; clean up legacy key on this write
+    settings.models.providers[PROVIDER_KEY] = {
       baseUrl: normalizedBaseUrl,
       apiKey: apiKey || "your_api_key",
       api: "openai-completions",
       models: [...allModelIds].map((m) => ({ id: m, name: m.split("/").pop() || m })),
     };
+    delete settings.models.providers[LEGACY_PROVIDER_KEY];
 
     // Set per-agent model in agents.list and write models.json
     if (settings.agents.list) {
       settings.agents.list = settings.agents.list.map((agent) => {
         const agentModel = agentModels[agent.id];
-        if (agentModel) return { ...agent, model: `9router/${agentModel}` };
+        if (agentModel) return { ...agent, model: `${MODEL_PREFIX}${agentModel}` };
         return agent;
       });
 
@@ -252,19 +262,20 @@ export async function DELETE() {
       throw error;
     }
 
-    // Remove 9Router from models.providers
+    // Remove kRouter (both new and legacy keys) from models.providers
     if (settings.models && settings.models.providers) {
-      delete settings.models.providers["9router"];
-      
+      delete settings.models.providers[PROVIDER_KEY];
+      delete settings.models.providers[LEGACY_PROVIDER_KEY];
+
       // Remove providers object if empty
       if (Object.keys(settings.models.providers).length === 0) {
         delete settings.models.providers;
       }
     }
 
-    // Remove 9router models from agents.defaults.models allowlist
+    // Remove krouter/9router models from agents.defaults.models allowlist
     if (settings.agents?.defaults?.models) {
-      const keysToRemove = Object.keys(settings.agents.defaults.models).filter((k) => k.startsWith("9router/"));
+      const keysToRemove = Object.keys(settings.agents.defaults.models).filter((k) => MODEL_PREFIX_RE.test(k));
       for (const key of keysToRemove) {
         delete settings.agents.defaults.models[key];
       }
@@ -273,8 +284,8 @@ export async function DELETE() {
       }
     }
 
-    // Reset agents.defaults.model.primary if it uses 9router
-    if (settings.agents?.defaults?.model?.primary?.startsWith("9router/")) {
+    // Reset agents.defaults.model.primary if it points at our provider
+    if (MODEL_PREFIX_RE.test(settings.agents?.defaults?.model?.primary || "")) {
       delete settings.agents.defaults.model.primary;
     }
 

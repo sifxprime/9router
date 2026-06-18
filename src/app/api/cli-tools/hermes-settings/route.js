@@ -9,7 +9,7 @@ import os from "os";
 
 const execAsync = promisify(exec);
 
-const PROVIDER_NAME = "9router";
+const PROVIDER_NAME = "krouter";
 const API_KEY_ENV = "OPENAI_API_KEY";
 
 const getHermesDir = () => path.join(os.homedir(), ".hermes");
@@ -92,8 +92,8 @@ const readEnvFile = async () => {
   }
 };
 
-// Detect 9router by base_url containing localhost/127.0.0.1 or matching tunnel URL
-const has9RouterConfig = (modelCfg) => {
+// Detect krouter by base_url containing localhost/127.0.0.1 or matching tunnel URL
+const hasKRouterConfig = (modelCfg) => {
   if (!modelCfg?.base_url) return false;
   return modelCfg.provider === "custom" && /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(modelCfg.base_url);
 };
@@ -109,7 +109,8 @@ export async function GET() {
     return NextResponse.json({
       installed: true,
       settings: { model },
-      has9Router: has9RouterConfig(model),
+      hasKRouter: hasKRouterConfig(model),
+      has9Router: hasKRouterConfig(model), // legacy field name kept for UIs not yet updated
       configPath: getHermesConfigPath(),
     });
   } catch (error) {

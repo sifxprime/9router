@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 
-const STORAGE_KEY = "9router.cliToolEndpointPresets";
+const STORAGE_KEY = "krouter.cliToolEndpointPresets";
+const LEGACY_STORAGE_KEY = "9router.cliToolEndpointPresets";
 const CUSTOM_VALUE = "__custom__";
 const SAVE_VALUE = "__save__";
 
@@ -16,9 +17,12 @@ const ensureV1 = (url) => {
 const readSavedPresets = () => {
   if (typeof window === "undefined") return [];
   try {
-    const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "[]");
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((p) => p?.name && p?.baseUrl);
+    // Prefer new key; fall back to legacy key if it exists.
+    let raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw == null) raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p) => p?.name && p?.baseUrl);
   } catch {
     return [];
   }
@@ -27,6 +31,8 @@ const readSavedPresets = () => {
 const writeSavedPresets = (presets) => {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+  // Remove the legacy key so future reads come from the new one only.
+  window.localStorage.removeItem(LEGACY_STORAGE_KEY);
 };
 
 const buildOptions = ({ requiresExternalUrl, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl, cloudEnabled, cloudUrl, savedPresets, withV1 }) => {

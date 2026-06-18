@@ -13,9 +13,22 @@ const execAsync = promisify(exec);
 const getJcodeConfigDir = () => path.join(os.homedir(), ".jcode");
 const getConfigPath = () => path.join(getJcodeConfigDir(), "config.toml");
 
+// Provider names and on-disk artifacts. "krouter" is canonical; "9router" is read
+// for backward-compat with existing jcode installs from before the rename.
+const PROVIDER_KEY = "krouter";
+const LEGACY_PROVIDER_KEY = "9router";
+const ENV_FILE = "provider-krouter.env";
+const LEGACY_ENV_FILE = "provider-9router.env";
+const API_KEY_ENV_VAR = "JCODE_KROUTER_API_KEY";
+const LEGACY_API_KEY_ENV_VAR = "JCODE_9ROUTER_API_KEY";
+
 const getProviderEnvPath = () => {
   const configDir = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  return path.join(configDir, "jcode", "provider-9router.env");
+  return path.join(configDir, "jcode", ENV_FILE);
+};
+const getLegacyProviderEnvPath = () => {
+  const configDir = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(configDir, "jcode", LEGACY_ENV_FILE);
 };
 
 const checkJcodeInstalled = async () => {
@@ -44,12 +57,12 @@ const readConfig = async () => {
   }
 };
 
-const has9RouterConfig = (config) => {
+const hasKRouterConfig = (config) => {
   if (!config || !config.providers) return false;
 
   const providers = config.providers;
 
-  if (providers["9router"]) return true;
+  if (providers[PROVIDER_KEY] || providers[LEGACY_PROVIDER_KEY]) return true;
 
   for (const [name, provider] of Object.entries(providers)) {
     if (provider.base_url && provider.base_url.includes("localhost:20128")) {
@@ -67,8 +80,14 @@ const writeConfig = async (config) => {
 };
 
 const readProviderEnv = async () => {
+  // Read the new provider-krouter.env first; fall back to legacy file for existing installs.
+  let envPath = getProviderEnvPath();
   try {
-    const envPath = getProviderEnvPath();
+    await fs.access(envPath);
+  } catch {
+    envPath = getLegacyProviderEnvPath();
+  }
+  try {
     const content = await fs.readFile(envPath, "utf-8");
     const env = {};
 
@@ -118,12 +137,13 @@ export async function GET() {
   }
 
   const config = await readConfig();
-  const has9Router = has9RouterConfig(config);
+  const hasKRouter = hasKRouterConfig(config);
 
   return NextResponse.json({
     installed: true,
     config,
-    has9Router,
+    hasKRouter,
+    has9Router: hasKRouter, // legacy field name kept for UIs not yet updated
     configPath: getConfigPath(),
   });
 }
@@ -149,15 +169,17 @@ export async function POST(request) {
       config.providers = {};
     }
 
-    config.providers["9router"] = {
+    config.providers[PROVIDER_KEY] = {
       type: "openai-compatible",
       base_url: normalizedBaseUrl,
       auth: "bearer",
-      api_key_env: "JCODE_9ROUTER_API_KEY",
-      env_file: "provider-9router.env",
+      api_key_env: API_KEY_ENV_VAR,
+      env_file: ENV_FILE,
       default_model: models && models.length > 0 ? models[0] : "cc/claude-opus-4-7",
       requires_api_key: true,
     };
+    // Remove the legacy provider block on this write so the user's config ends up canonical
+    delete config.providers[LEGACY_PROVIDER_KEY];
 
     const configDir = getJcodeConfigDir();
     await fs.mkdir(configDir, { recursive: true });
@@ -169,12 +191,15 @@ export async function POST(request) {
     await fs.mkdir(jcodeConfigDir, { recursive: true });
 
     const env = await readProviderEnv();
-    env.JCODE_9ROUTER_API_KEY = apiKey;
+    env[API_KEY_ENV_VAR] = apiKey;
+    delete env[LEGACY_API_KEY_ENV_VAR];
     await writeProviderEnv(env);
+    // Best-effort remove legacy env file so it doesn't shadow the new one
+    try { await fs.unlink(getLegacyProviderEnvPath()); } catch { /* not present */ }
 
     return NextResponse.json({
       success: true,
-      message: "jcode configured successfully. Use: jcode --provider-profile 9router",
+      message: "jcode configured successfully. Use: jcode --provider-profile krouter",
       configPath: getConfigPath(),
     });
   } catch (error) {
@@ -194,17 +219,20 @@ export async function DELETE() {
       return NextResponse.json({ success: true, message: "No configuration to remove" });
     }
 
-    delete config.providers["9router"];
+    delete config.providers[PROVIDER_KEY];
+    delete config.providers[LEGACY_PROVIDER_KEY];
 
     await writeConfig(config);
 
     const env = await readProviderEnv();
-    delete env.JCODE_9ROUTER_API_KEY;
+    delete env[API_KEY_ENV_VAR];
+    delete env[LEGACY_API_KEY_ENV_VAR];
     await writeProviderEnv(env);
+    try { await fs.unlink(getLegacyProviderEnvPath()); } catch { /* not present */ }
 
     return NextResponse.json({
       success: true,
-      message: "9router configuration removed from jcode",
+      message: "kRouter configuration removed from jcode",
     });
   } catch (error) {
     console.error("Error removing jcode configuration:", error);

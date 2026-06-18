@@ -73,10 +73,18 @@ const readConfig = async () => {
   }
 };
 
-// Check if config has 9Router settings
-const has9RouterConfig = (config) => {
+// Provider key in Codex's config.toml. "krouter" is canonical; "9router" is detected
+// as a fallback so existing installs still light up green, then get cleaned up on next write.
+const PROVIDER_KEY = "krouter";
+const LEGACY_PROVIDER_KEY = "9router";
+
+// Check if config has kRouter settings (under new or legacy key)
+const hasKRouterConfig = (config) => {
   if (!config) return false;
-  return config.includes("model_provider = \"9router\"") || config.includes("[model_providers.9router]");
+  return config.includes(`model_provider = "${PROVIDER_KEY}"`)
+    || config.includes(`[model_providers.${PROVIDER_KEY}]`)
+    || config.includes(`model_provider = "${LEGACY_PROVIDER_KEY}"`)
+    || config.includes(`[model_providers.${LEGACY_PROVIDER_KEY}]`);
 };
 
 // GET - Check codex CLI and read current settings
@@ -97,7 +105,8 @@ export async function GET() {
     return NextResponse.json({
       installed: true,
       config,
-      has9Router: has9RouterConfig(config),
+      hasKRouter: hasKRouterConfig(config),
+      has9Router: hasKRouterConfig(config), // legacy field name kept for UIs not yet updated
       configPath: getCodexConfigPath(),
     });
   } catch (error) {
@@ -128,18 +137,19 @@ export async function POST(request) {
       parsed = parsedToWritable(parseTOML(existingConfig));
     } catch { /* No existing config */ }
 
-    // Update only 9Router related fields (api_key goes to auth.json, not config.toml)
+    // Update only kRouter-related fields (api_key goes to auth.json, not config.toml)
     parsed.model = model;
-    parsed.model_provider = "9router";
+    parsed.model_provider = PROVIDER_KEY;
 
-    // Update or create 9router provider section (no api_key - Codex reads from auth.json)
-    // Ensure /v1 suffix is added only once
+    // Update or create krouter provider section. Clean up the legacy 9router section
+    // if it exists so the user's config ends up canonical.
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    setNestedSection(parsed, "model_providers.9router", {
+    setNestedSection(parsed, `model_providers.${PROVIDER_KEY}`, {
       name: "kRouter",
       base_url: normalizedBaseUrl,
       wire_api: "responses",
     });
+    deleteNestedSection(parsed, `model_providers.${LEGACY_PROVIDER_KEY}`);
 
     // Add subagent configuration
     const effectiveSubagentModel = subagentModel || model;
@@ -195,14 +205,15 @@ export async function DELETE() {
       throw error;
     }
 
-    // Remove 9Router related root fields only if they point to 9router
-    if (parsed.model_provider === "9router") {
+    // Remove kRouter-related root fields if they point to either provider key
+    if (parsed.model_provider === PROVIDER_KEY || parsed.model_provider === LEGACY_PROVIDER_KEY) {
       delete parsed.model;
       delete parsed.model_provider;
     }
 
-    // Remove 9router provider section
-    deleteNestedSection(parsed, "model_providers.9router");
+    // Remove provider section under both keys
+    deleteNestedSection(parsed, `model_providers.${PROVIDER_KEY}`);
+    deleteNestedSection(parsed, `model_providers.${LEGACY_PROVIDER_KEY}`);
 
     // Remove subagent configuration
     deleteNestedSection(parsed, "agents.subagent");

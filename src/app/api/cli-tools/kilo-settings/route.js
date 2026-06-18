@@ -42,12 +42,17 @@ const readJson = async (filePath) => {
   }
 };
 
-const has9RouterConfig = (auth) => {
+// Kilo writes our config under auth["openai-compatible"] (Kilo's own provider slug).
+// The "9router" key is a vestigial fallback from a much older version of this app —
+// kept here only so an existing install still resolves correctly.
+const LEGACY_AUTH_KEY = "9router";
+
+const hasKRouterConfig = (auth) => {
   if (!auth) return false;
-  const entry = auth["openai-compatible"] || auth["9router"];
+  const entry = auth["openai-compatible"] || auth[LEGACY_AUTH_KEY];
   if (!entry) return false;
   const baseUrl = entry.baseUrl || entry.baseURL || "";
-  return baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("9router");
+  return baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("krouter") || baseUrl.includes("9router");
 };
 
 export async function GET() {
@@ -60,7 +65,8 @@ export async function GET() {
     return NextResponse.json({
       installed: true,
       settings: { auth: auth ? Object.keys(auth) : [] },
-      has9Router: has9RouterConfig(auth),
+      hasKRouter: hasKRouterConfig(auth),
+      has9Router: hasKRouterConfig(auth), // legacy field name kept for UIs not yet updated
       authPath: getAuthPath(),
     });
   } catch (error) {
@@ -111,7 +117,7 @@ export async function DELETE() {
       return NextResponse.json({ success: true, message: "No settings file to reset" });
     }
     delete auth["openai-compatible"];
-    delete auth["9router"];
+    delete auth[LEGACY_AUTH_KEY];
     await fs.writeFile(getAuthPath(), JSON.stringify(auth, null, 2));
 
     try {
