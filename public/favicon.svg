@@ -1,20 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
-
-  <rect width="400" height="400" fill="#ffffff"/>
-
-  <!-- Kodelyth Mark — Ghost Depth -->
-  <!-- Ghost trails LEFT of the solid — peeks out from behind the left arms -->
-  <!-- Solid is the dominant forward-facing mark -->
-  <g stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#0f172a">
-
-    <!-- ghost — left of solid, lighter stroke, recedes behind -->
-    <polyline points="128,104 184,200 128,296"
-              stroke-width="10" stroke-opacity="0.15"/>
-
-    <!-- solid — primary mark, full weight, forward -->
-    <polyline points="172,100 260,200 172,300"
-              stroke-width="32"/>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <g fill="none" stroke="#E56A4A" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="128,104 184,200 128,296" stroke-width="28" stroke-opacity="0.25"/>
+    <polyline points="172,100 260,200 172,300" stroke-width="52"/>
   </g>
-
 </svg>

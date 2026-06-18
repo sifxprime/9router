@@ -30,9 +30,9 @@ export default function HeroSection() {
             <span className="material-symbols-outlined">rocket_launch</span>
             Get Started
           </button>
-          <a 
-            href="https://github.com/decolua/9router" 
-            target="_blank" 
+          <a
+            href="https://github.com/sifxprime/krouter"
+            target="_blank"
             rel="noopener noreferrer"
             className="h-12 px-8 rounded-lg border border-[#3a2f27] bg-[#23180f] hover:bg-[#3a2f27] text-white text-base font-bold transition-all flex items-center gap-2"
           >

@@ -161,7 +161,7 @@ npm run start          # standalone server on PORT=20128
 
 Either way, open: **[http://localhost:20128/dashboard](http://localhost:20128/dashboard)**
 
-On first run the app creates `~/.9router/` (SQLite DB, machine-id, MITM CA) — it's gitignored, per-user, and fully reset by deleting that folder.
+On first run the app creates `~/.krouter/` (SQLite DB, machine-id, MITM CA) — it's gitignored, per-user, and fully reset by deleting that folder. Upgrading from a pre-rename install? The legacy `~/.9router/` is auto-migrated to `~/.krouter/` on first launch, idempotent and lossless.
 
 ### What happens next (no reboot, no extra config)
 
@@ -169,12 +169,12 @@ On first run the app creates `~/.9router/` (SQLite DB, machine-id, MITM CA) — 
    - **Free, no signup needed**: MiMo Code Free, OpenCode Free → click [+] on the suggested model.
    - **Free, login required**: Kiro AI (AWS Builder ID **or** Google **or** GitHub thanks to this fork's device-code OAuth), Gemini CLI, Qoder.
    - **API key**: OpenRouter, NVIDIA NIM, Anthropic, OpenAI, etc.
-2. **Dashboard → API Keys** → create one local API key (e.g. `sk-9router-XXXX`).
-3. Point any AI tool at 9router:
+2. **Dashboard → API Keys** → create one local API key (e.g. `sk-krouter-XXXX`).
+3. Point any AI tool at kRouter:
 
    ```text
    Endpoint:  http://localhost:20128/v1
-   API key:   sk-9router-XXXX        (from step 2)
+   API key:   sk-krouter-XXXX        (from step 2)
    Model:     kr/claude-sonnet-4.5   (or whatever provider/model you connected)
    ```
 
@@ -1025,15 +1025,15 @@ Dashboard → CLI Tools → OpenClaw → Select Model → Apply
   "agents": {
     "defaults": {
       "model": {
-        "primary": "9router/kr/claude-sonnet-4.5"
+        "primary": "krouter/kr/claude-sonnet-4.5"
       }
     }
   },
   "models": {
     "providers": {
-      "9router": {
+      "krouter": {
         "baseUrl": "http://127.0.0.1:20128/v1",
-        "apiKey": "sk_9router",
+        "apiKey": "sk_krouter",
         "api": "openai-completions",
         "models": [
           {
@@ -1142,9 +1142,9 @@ docker pull decolua/9router:latest   # update to latest
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JWT_SECRET` | Auto-generated (`~/.9router/jwt-secret`) | JWT signing secret for dashboard auth cookie (override to share across instances) |
+| `JWT_SECRET` | Auto-generated (`~/.krouter/jwt-secret`) | JWT signing secret for dashboard auth cookie (override to share across instances) |
 | `INITIAL_PASSWORD` | `123456` | First login password when no saved hash exists |
-| `DATA_DIR` | `~/.9router` | Main app data location (SQLite at `$DATA_DIR/db/data.sqlite`) |
+| `DATA_DIR` | `~/.krouter` | Main app data location (SQLite at `$DATA_DIR/db/data.sqlite`) |
 | `PORT` | framework default | Service port (`20128` in examples) |
 | `HOSTNAME` | framework default | Bind host (Docker defaults to `0.0.0.0`) |
 | `NODE_ENV` | runtime default | Set `production` for deploy |
