@@ -9,7 +9,7 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
-const packageName = process.env.UPDATER_PKG_NAME || "9router";
+const packageName = process.env.UPDATER_PKG_NAME || "@sifxprime/krouter";
 const port = parseInt(process.env.UPDATER_PORT || "20129", 10);
 const tailLines = parseInt(process.env.UPDATER_TAIL_LINES || "8", 10);
 const maxRetries = parseInt(process.env.UPDATER_RETRIES || "3", 10);
@@ -20,13 +20,23 @@ const waitMaxMs = parseInt(process.env.UPDATER_WAIT_MAX_MS || "15000", 10);
 const waitCheckMs = parseInt(process.env.UPDATER_WAIT_CHECK_MS || "500", 10);
 const appPort = parseInt(process.env.UPDATER_APP_PORT || "20128", 10);
 
-// Data directory (match mitm/paths.js logic)
+// Data directory (must match src/mitm/paths.js — one-time auto-migration of ~/.9router → ~/.krouter)
+function appNameDir(name) {
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), name);
+  }
+  return path.join(os.homedir(), `.${name}`);
+}
 function getDataDir() {
   if (process.env.DATA_DIR) return process.env.DATA_DIR;
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router");
-  }
-  return path.join(os.homedir(), ".9router");
+  const target = appNameDir("krouter");
+  const legacy = appNameDir("9router");
+  try {
+    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
+      fs.renameSync(legacy, target);
+    }
+  } catch { /* best effort */ }
+  return target;
 }
 const updateDir = path.join(getDataDir(), "update");
 try { fs.mkdirSync(updateDir, { recursive: true }); } catch { /* best effort */ }

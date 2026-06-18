@@ -5,10 +5,20 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const DATA_DIR = process.env.DATA_DIR
-  || (process.platform === "win32"
-    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router")
-    : path.join(os.homedir(), ".9router"));
+// Resolves to ~/.krouter, falling back to legacy ~/.9router only if the new dir doesn't
+// exist yet — paths.js / dataDir.js handle the actual rename on startup.
+function _resolveDataDir() {
+  if (process.env.DATA_DIR) return process.env.DATA_DIR;
+  const winBase = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "krouter");
+  const winLegacy = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router");
+  const nixBase = path.join(os.homedir(), ".krouter");
+  const nixLegacy = path.join(os.homedir(), ".9router");
+  if (process.platform === "win32") {
+    return fs.existsSync(winBase) || !fs.existsSync(winLegacy) ? winBase : winLegacy;
+  }
+  return fs.existsSync(nixBase) || !fs.existsSync(nixLegacy) ? nixBase : nixLegacy;
+}
+const DATA_DIR = _resolveDataDir();
 
 const CACHE_FILE = path.join(DATA_DIR, "mitm", "aliases.json");
 

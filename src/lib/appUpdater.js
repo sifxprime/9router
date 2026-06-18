@@ -10,13 +10,7 @@ const PROCESS_WAIT_MS = 1500;
 // Kill MITM server by PID file (MITM may run as admin/sudo)
 function killMitmByPidFile() {
   try {
-    const mitmPidFile = path.join(
-      process.platform === "win32"
-        ? path.join(process.env.APPDATA || "", "9router")
-        : path.join(os.homedir(), ".9router"),
-      "mitm",
-      ".mitm.pid"
-    );
+    const mitmPidFile = path.join(getDataDir(), "mitm", ".mitm.pid");
     if (!fs.existsSync(mitmPidFile)) return;
     const pid = parseInt(fs.readFileSync(mitmPidFile, "utf8").trim(), 10);
     if (!pid) return;
@@ -37,7 +31,8 @@ function killMitmByPidFile() {
   } catch { /* best effort */ }
 }
 
-// Collect PIDs of all 9router-related processes (excluding current)
+// Collect PIDs of all krouter-related processes (excluding current). Matches both
+// the current "krouter" name and the legacy "9router" name so existing installs upgrade cleanly.
 function collectAppPids() {
   const pids = [];
   const platform = process.platform;
@@ -49,8 +44,9 @@ function collectAppPids() {
       const lines = output.split("\n").slice(1).filter(l => l.trim());
       lines.forEach(line => {
         const lower = line.toLowerCase();
-        // Match anything running from 9router install dir or wrapper cli.js
-        const isAppProcess = lower.includes("9router") ||
+        // Match anything running from krouter (or legacy 9router) install dir or wrapper cli.js
+        const isAppProcess = lower.includes("krouter") ||
+          lower.includes("9router") ||
           lower.includes("next-server") ||
           lower.includes("\\bin\\app\\") ||
           lower.includes("/bin/app/") ||
@@ -77,7 +73,8 @@ function collectAppPids() {
     try {
       const output = execSync("ps aux 2>/dev/null", { encoding: "utf8", timeout: KILL_TIMEOUT_MS });
       output.split("\n").forEach(line => {
-        const isAppProcess = line.includes("9router") ||
+        const isAppProcess = line.includes("krouter") ||
+          line.includes("9router") ||
           line.includes("next-server") ||
           line.includes("cloudflared") ||
           line.includes("/bin/app/") ||
@@ -95,13 +92,24 @@ function collectAppPids() {
   return pids;
 }
 
-// Copy updater.js into DATA_DIR so npm -g can overwrite node_modules safely
+// Copy updater.js into DATA_DIR so npm -g can overwrite node_modules safely.
+// Mirrors src/lib/dataDir.js — one-time auto-migration of ~/.9router → ~/.krouter.
+function appNameDir(name) {
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), name);
+  }
+  return path.join(os.homedir(), `.${name}`);
+}
 function getDataDir() {
   if (process.env.DATA_DIR) return process.env.DATA_DIR;
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router");
-  }
-  return path.join(os.homedir(), ".9router");
+  const target = appNameDir("krouter");
+  const legacy = appNameDir("9router");
+  try {
+    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
+      fs.renameSync(legacy, target);
+    }
+  } catch { /* best effort — paths.js / dataDir.js will retry on their next call */ }
+  return target;
 }
 
 function resolveBundledUpdaterPath() {
@@ -156,10 +164,10 @@ export async function killAppProcesses() {
   }
 }
 
-// Resolve npx/9router binary to relaunch after update (cross-platform)
+// Resolve npx/krouter binary to relaunch after update (cross-platform)
 function resolveRelaunchCommand() {
   const isWin = process.platform === "win32";
-  // Prefer `npx 9router` — works regardless of global bin path changes after npm i -g
+  // Prefer `npx krouter` — works regardless of global bin path changes after npm i -g
   const npx = isWin ? "npx.cmd" : "npx";
   return { cmd: npx, args: [UPDATER_CONFIG.npmPackageName] };
 }

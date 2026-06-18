@@ -175,8 +175,9 @@ async function uninstallCertWindows() {
 
 function checkCertInstalledLinux() {
   const config = getLinuxCertConfig();
-  const certFile = `${config.dir}/9router-root-ca.crt`;
-  return Promise.resolve(fs.existsSync(certFile));
+  const certFile = `${config.dir}/krouter-root-ca.crt`;
+  const legacyCertFile = `${config.dir}/9router-root-ca.crt`;
+  return Promise.resolve(fs.existsSync(certFile) || fs.existsSync(legacyCertFile));
 }
 
 async function updateNssDatabases(certPath, action = 'add') {
@@ -232,10 +233,12 @@ async function installCertLinux(sudoPassword, certPath) {
   }
   
   const config = getLinuxCertConfig();
-  const destFile = `${config.dir}/9router-root-ca.crt`;
-  
-  // Copy to the discovered directory and execute the specific update command
-  const cmd = `cp "${certPath}" "${destFile}" && (${config.cmd} 2>/dev/null || true)`;
+  const destFile = `${config.dir}/krouter-root-ca.crt`;
+
+  // Copy to the discovered directory and execute the specific update command.
+  // Also best-effort remove the legacy 9router-named file so the trust store stays clean.
+  const legacyFile = `${config.dir}/9router-root-ca.crt`;
+  const cmd = `rm -f "${legacyFile}"; cp "${certPath}" "${destFile}" && (${config.cmd} 2>/dev/null || true)`;
   
   try {
     await execWithPassword(cmd, sudoPassword);
@@ -255,8 +258,9 @@ async function uninstallCertLinux(sudoPassword) {
   }
   
   const config = getLinuxCertConfig();
-  const destFile = `${config.dir}/9router-root-ca.crt`;
-  const cmd = `rm -f "${destFile}" && (${config.cmd} 2>/dev/null || true)`;
+  const destFile = `${config.dir}/krouter-root-ca.crt`;
+  const legacyFile = `${config.dir}/9router-root-ca.crt`;
+  const cmd = `rm -f "${destFile}" "${legacyFile}" && (${config.cmd} 2>/dev/null || true)`;
   
   try {
     await execWithPassword(cmd, sudoPassword);

@@ -47,7 +47,7 @@ const { ensureSqliteRuntime, buildEnvWithRuntime } = require("./hooks/sqliteRunt
 const { ensureTrayRuntime } = require("./hooks/trayRuntime");
 const args = process.argv.slice(2);
 
-// Self-heal SQLite runtime deps (sql.js + better-sqlite3) into ~/.9router/runtime
+// Self-heal SQLite runtime deps (sql.js + better-sqlite3) into ~/.krouter/runtime
 // so the server can resolve them via NODE_PATH. Best-effort — sql.js is required,
 // better-sqlite3 is optional. Logs to stderr only on failure.
 try { ensureSqliteRuntime({ silent: true }); } catch {}
@@ -62,9 +62,10 @@ const INSTALL_CMD_LATEST = `npm i -g ${APP_NAME}@latest --prefer-online`;
 const DEFAULT_PORT = 20128;
 const DEFAULT_HOST = "0.0.0.0";
 const MAX_PORT_ATTEMPTS = 10;
-// Identifiers for killAllAppProcesses - only kill 9router specifically
+// Identifiers for killAllAppProcesses - only kill our own app specifically (new + legacy names)
 const PROCESS_IDENTIFIERS = [
-  '9router'  // Only package name - avoid killing other apps
+  'krouter',
+  '9router'  // legacy — kept so an existing install still cleans up properly
 ];
 
 // Parse arguments
@@ -132,11 +133,26 @@ function compareVersions(a, b) {
   return 0;
 }
 
-// Get app data dir (matches app/src/lib/dataDir.js convention)
-function getAppDataDir() {
+// Get app data dir (must match src/mitm/paths.js — same one-time auto-migration).
+const DATA_DIR_NAME = "krouter";
+const LEGACY_DATA_DIR_NAME = "9router";
+function dataDirByName(name) {
   return process.platform === "win32"
-    ? path.join(process.env.APPDATA || "", "9router")
-    : path.join(os.homedir(), ".9router");
+    ? path.join(process.env.APPDATA || "", name)
+    : path.join(os.homedir(), `.${name}`);
+}
+function getAppDataDir() {
+  const target = dataDirByName(DATA_DIR_NAME);
+  const legacy = dataDirByName(LEGACY_DATA_DIR_NAME);
+  try {
+    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
+      fs.renameSync(legacy, target);
+      console.log(`[cli] Migrated data dir: ${legacy} → ${target}`);
+    }
+  } catch (e) {
+    console.warn(`[cli] Data-dir auto-migration failed (${e.code || e.message}); continuing with ${target}`);
+  }
+  return target;
 }
 
 // Kill PID from file (best-effort, removes file after)
@@ -219,11 +235,13 @@ function killAllAppProcesses(appPort) {
           });
           const lines = output.split("\n").slice(1).filter(l => l.trim());
           lines.forEach(line => {
-            // Whitelist: real node process running 9router/cli.js, or next-server.
-            // Avoids killing editors/grep/strace/cursor that just have "9router" in cmdline.
+            // Whitelist: real node process running krouter (or legacy 9router) cli.js, or next-server.
+            // Avoids killing editors/grep/strace/cursor that just incidentally match the name.
             const cmd = line.toLowerCase();
+            const hasAppName = cmd.includes("krouter") || cmd.includes("9router");
+            const hasAppPath = cmd.includes("cli.js") || cmd.includes("\\krouter") || cmd.includes("/krouter") || cmd.includes("\\9router") || cmd.includes("/9router");
             const isAppProcess =
-              (cmd.includes("node") && cmd.includes("9router") && (cmd.includes("cli.js") || cmd.includes("\\9router") || cmd.includes("/9router")))
+              (cmd.includes("node") && hasAppName && hasAppPath)
               || cmd.includes("next-server");
             if (isAppProcess) {
               const match = line.match(/^"(\d+)"/);
@@ -245,11 +263,13 @@ function killAllAppProcesses(appPort) {
           const lines = output.split('\n');
 
           lines.forEach(line => {
-            // Whitelist: real node process running 9router/cli.js, or next-server.
-            // Avoids killing grep/strace/editors/cursor that incidentally match "9router".
+            // Whitelist: real node process running krouter (or legacy 9router) cli.js, or next-server.
+            // Avoids killing grep/strace/editors/cursor that incidentally match the name.
             const cmd = line.toLowerCase();
+            const hasAppName = cmd.includes("krouter") || cmd.includes("9router");
+            const hasAppPath = cmd.includes("cli.js") || cmd.includes("/krouter") || cmd.includes("/9router");
             const isAppProcess =
-              (cmd.includes("node") && cmd.includes("9router") && (cmd.includes("cli.js") || cmd.includes("/9router")))
+              (cmd.includes("node") && hasAppName && hasAppPath)
               || cmd.includes("next-server");
             if (isAppProcess) {
               const parts = line.trim().split(/\s+/);
@@ -778,7 +798,7 @@ function startServer(latestVersion) {
     if (restartCount >= MAX_RESTARTS) {
       console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times. Disabling MIT and restarting...`);
       try {
-        const dbPath = path.join(os.homedir(), process.platform === "win32" ? path.join("AppData", "Roaming", "9router", "db.json") : path.join(".9router", "db.json"));
+        const dbPath = path.join(getAppDataDir(), "db.json");
         if (fs.existsSync(dbPath)) {
           const db = JSON.parse(fs.readFileSync(dbPath, "utf-8"));
           if (db.settings) db.settings.mitmEnabled = false;
