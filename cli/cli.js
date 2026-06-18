@@ -55,6 +55,15 @@ try { ensureSqliteRuntime({ silent: true }); } catch {}
 // Self-heal tray runtime (systray for macOS/Linux only). Windows skipped.
 try { ensureTrayRuntime({ silent: true }); } catch {}
 
+// Upgrade safety: existing v0.5.6 users who had autostart enabled may have a
+// LaunchAgent / Startup .vbs / .desktop file pointing at the old `9router`
+// global binary that's been uninstalled. Sweep dangling entries so launchd
+// doesn't error every boot — user re-enables from the new tray when ready.
+try {
+  const { sweepDanglingAutostartEntries } = require("./src/cli/tray/autostart");
+  sweepDanglingAutostartEntries();
+} catch {}
+
 // Configuration constants
 const APP_NAME = pkg.name; // Use from package.json
 const INSTALL_CMD_LATEST = `npm i -g ${APP_NAME}@latest --prefer-online`;

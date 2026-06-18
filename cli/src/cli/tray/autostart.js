@@ -175,6 +175,71 @@ function cleanupLegacyMacOSAutostart() {
   } catch (e) { /* leave it alone if we can't write */ }
 }
 
+/**
+ * One-time best-effort sweep run at every kRouter startup: detect autostart
+ * entries (LaunchAgent / Startup .vbs / .desktop) that point at an executable
+ * which no longer exists on disk, and remove them. Catches the upgrade case
+ * where a v0.5.6 user:
+ *   1. had autostart enabled (entry points at npm-global path of the old
+ *      `9router` package)
+ *   2. ran `npm uninstall -g 9router` then `npm i -g @sifxprime/krouter`
+ *   3. the entry now references a binary that no longer exists, so launchd
+ *      logs an error every boot and no tray appears.
+ *
+ * After cleanup the user can re-enable autostart from the new tray menu and
+ * the cleanup helpers above write a fresh entry pointing at the new install.
+ */
+function sweepDanglingAutostartEntries() {
+  if (process.platform === "darwin") {
+    for (const label of [LEGACY_APP_LABEL, APP_LABEL]) {
+      const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
+      if (!fs.existsSync(plistPath)) continue;
+      try {
+        const content = fs.readFileSync(plistPath, "utf-8");
+        // ProgramArguments are inside <string>…</string> tags; we care about the
+        // FIRST node executable and the SECOND argument (path to cli.js).
+        const argMatches = [...content.matchAll(/<string>([^<]+)<\/string>/g)].map((m) => m[1]);
+        // Find the path that looks like a cli.js entry (ends with cli.js or
+        // is the npm-global lib path for the old "9router" package).
+        const scriptArg = argMatches.find((a) => /cli\.js$/.test(a) || a.includes("9router"));
+        if (scriptArg && !fs.existsSync(scriptArg)) {
+          if (!isAgentSelfMacOS(label)) {
+            try { execSync(`launchctl unload "${plistPath}"`, { stdio: "ignore" }); } catch { /* ignore */ }
+          }
+          fs.unlinkSync(plistPath);
+        }
+      } catch { /* unreadable plist — skip */ }
+    }
+  } else if (process.platform === "win32") {
+    const startupDir = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+    for (const name of [`${APP_NAME}.vbs`, `${LEGACY_APP_NAME}.vbs`]) {
+      const vbsPath = path.join(startupDir, name);
+      if (!fs.existsSync(vbsPath)) continue;
+      try {
+        const content = fs.readFileSync(vbsPath, "utf-8");
+        // VBS shape: WshShell.Run """{nodePath}"" ""{cliJsPath}"" --tray --skip-update", 0, False
+        const m = content.match(/WshShell\.Run\s+"""([^"]+)""\s+""([^"]+)""/);
+        if (m && (!fs.existsSync(m[1]) || !fs.existsSync(m[2]))) {
+          fs.unlinkSync(vbsPath);
+        }
+      } catch { /* unreadable vbs — skip */ }
+    }
+  } else if (process.platform === "linux") {
+    const autostartDir = path.join(os.homedir(), ".config", "autostart");
+    for (const name of [`${APP_NAME}.desktop`, `${LEGACY_APP_NAME}.desktop`]) {
+      const desktopPath = path.join(autostartDir, name);
+      if (!fs.existsSync(desktopPath)) continue;
+      try {
+        const content = fs.readFileSync(desktopPath, "utf-8");
+        const m = content.match(/^Exec=(\S+)\s+(\S+)/m);
+        if (m && (!fs.existsSync(m[1]) || !fs.existsSync(m[2]))) {
+          fs.unlinkSync(desktopPath);
+        }
+      } catch { /* unreadable desktop — skip */ }
+    }
+  }
+}
+
 function enableMacOS(cliPath) {
   // Migrate away from the pre-rename plist BEFORE writing the new one so the
   // user doesn't end up with two LaunchAgents both firing on next login.
@@ -364,5 +429,6 @@ function disableLinux() {
 module.exports = {
   enableAutoStart,
   disableAutoStart,
-  isAutoStartEnabled
+  isAutoStartEnabled,
+  sweepDanglingAutostartEntries
 };
