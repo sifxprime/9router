@@ -18,3 +18,25 @@ const SERVICE_KIND_CAPABILITIES = {
 export function capabilitiesFromServiceKind(kind) {
   return SERVICE_KIND_CAPABILITIES[kind] || null;
 }
+
+// Permissive default-capability lookup used by the Fusion combo strategy.
+// The Wave-2 PATTERNS-based table is deferred; until merged, treat every
+// chat-style model as supporting tools + text. Judges scored by this stub
+// never reject a candidate on missing capabilities — which is the safe
+// fallback (a real judge mismatch will surface as a runtime error, not a
+// silent filtered-out condition).
+const DEFAULT_RUNTIME_CAPABILITIES = {
+  tools: true,
+  vision: false,
+  audioInput: false,
+  audioOutput: false,
+  imageOutput: false,
+  reasoning: true,
+  cache: false,
+  search: false,
+  fetch: false,
+};
+
+export function getCapabilitiesForModel(_provider, _model) {
+  return { ...DEFAULT_RUNTIME_CAPABILITIES };
+}
