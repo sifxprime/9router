@@ -1,3 +1,49 @@
+# v0.5.7 (2026-06-18) — kRouter rebrand: visible surfaces + safe migrations
+
+Final rebrand pass turning every user-visible "9router/9Router" identifier into the canonical `krouter/kRouter` name, with one-time migrations on disk so existing v0.5.x installs upgrade cleanly with zero data loss and zero double-launch.
+
+## Data directory rename with auto-migration
+- `~/.9router/` → `~/.krouter/` (Windows: `%APPDATA%\9router\` → `%APPDATA%\krouter\`). Idempotent `fs.renameSync` runs on first launch only when the new dir doesn't exist and the legacy one does — wired into five separate entry points (`src/mitm/paths.js`, `src/lib/dataDir.js`, `cli/cli.js`, `cli/hooks/sqliteRuntime.js`, `cli/src/cli/api/client.js`) so any process startup path migrates.
+- Linux MITM trust-store file renamed `9router-root-ca.crt` → `krouter-root-ca.crt`. Uninstall removes both.
+- macOS keychain CN unchanged ("9Router MITM Root CA") — keychain trusts by CN not file path, so the cert moves with the data dir and HTTPS keeps working with zero re-trust prompts.
+
+## CLI tools rename with dual-read backward compat
+Every IDE config writer (OpenCode, OpenClaw, JCode, Codex, Kilo, Cline, Copilot, Hermes, DeepSeek-TUI, Droid, Cowork-MCP) now writes the canonical `krouter` provider key, and detects the legacy `9router` key as a read-fallback. On the next "Apply" click the user's IDE config converges to canonical names. Specifics:
+- OpenCode `provider["krouter"]`, model prefix `krouter/`, dual-match regex `^(?:krouter|9router)\/`
+- OpenClaw `providers["krouter"]` in `models.providers`, `agents.list`, and per-agent `models.json`
+- JCode `providers["krouter"]`, env file renamed `provider-krouter.env`, env var `JCODE_KROUTER_API_KEY`; legacy env file removed on write; CLI flag now `jcode --provider-profile krouter`
+- Codex `model_provider = "krouter"`, `[model_providers.krouter]` section; legacy section removed on next save
+- Droid `custom:kRouter-N` IDs; legacy `custom:9Router-N` detected as fallback
+- 25+ `sk_9router` localhost placeholder API keys → `sk_krouter` (not validated server-side, safe to rename)
+- localStorage key for endpoint presets migrated; legacy key read once then removed
+
+## CLI / system-tray visible surfaces
+- Tray menu label + tooltip: `9Router (Port N)` → `kRouter (Port N)`
+- Console messages: `🔔 9Router is running in tray` → `🔔 kRouter ...`
+- Terminal UI title + breadcrumb: `📡 kRouter Terminal UI`
+- macOS plist log paths: `/tmp/krouter.log` + `/tmp/krouter.error.log`
+- npm postinstall log prefix: `[krouter] runtime SQLite deps ready`
+- Tray + SQLite runtime npm-package name: `krouter-runtime`
+- Linux .desktop `Name=kRouter`, `Comment=kRouter API Proxy`
+
+## Autostart bundle ID migration with self-kill protection
+The macOS LaunchAgent identifier moved from `com.9router.autostart` → `com.krouter.autostart`. A `cleanupLegacyMacOSAutostart()` helper runs on every enable/disable: unloads the legacy plist with launchd, deletes the file from `~/Library/LaunchAgents/`, then writes the new one. Self-kill protection: if the current Node process IS the running legacy launchd-managed agent, the unload step is skipped (would SIGTERM us mid-execution) — file removal alone is sufficient, launchd releases the agent on next login. Linux `.desktop` and Windows `.vbs` filenames migrate the same way (legacy file removed before new file written). `isAutoStartEnabled()` returns true for either entry so a pre-rename install still reads as enabled until next toggle.
+
+## Dashboard sidebar wordmark
+Now rendered in CAPITAL via Tailwind `uppercase` + 0.04em tracking — `KROUTER` with `v0.5.7` below. Kodelyth Mark on the brand-orange tile unchanged.
+
+## Intentionally NOT changed
+- HTTP wire-protocol identifiers (`X-CLIENT-TYPE`, `X-Msh-Platform`, `grok-cli/9router` user-agent, `x-9r-cli-token`, `9r-cli-auth`) — sent to/shared with third-party services or between client+server; renaming requires coordinated changes with no user benefit.
+- `decolua/9router` upstream-credit links in landing nav/footer — intentional attribution to fork source.
+
+## Verification on maintainer's machine
+- `~/.9router/` (1.4 MB `data.sqlite`, auth, jwt-secret, machine-id, MITM cert) → `~/.krouter/` migrated in-place, all files intact, zero data loss.
+- `com.9router.autostart.plist` cleanly removed; `com.krouter.autostart.plist` registered with launchd, PID 94237 running, exactly one router process (no double-launch).
+- `/api/version` HTTP 200 from dev server; every cli-tools settings endpoint compiles and reaches auth gate (HTTP 401), no 500s.
+- All 41 modified files pass `node --check`; zero errors or warnings in dev log.
+
+---
+
 # v0.4.80+sifxprime.1 (2026-06-15) — fork hardening pass
 
 Hardening overlay on top of upstream `decolua/9router@v0.4.80`. Eleven audit findings closed across nine atomic commits; each fix carries a unit test that reproduces the BEFORE behavior plus live end-to-end verification through Kiro → MITM → router → real provider. Bug 11 from the audit was dropped after empirical disproof.
