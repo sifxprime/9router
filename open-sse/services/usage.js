@@ -502,7 +502,7 @@ async function getAntigravitySubscriptionInfo(accessToken, proxyOptions = null) 
 /**
  * Claude Usage - Primary: OAuth endpoint, Fallback: legacy settings/org endpoint
  */
-async function getClaudeUsage(accessToken, proxyOptions = null) {
+export async function getClaudeUsage(accessToken, proxyOptions = null) {
   try {
     // Primary: OAuth usage endpoint (Claude Code consumer OAuth tokens)
     const oauthResponse = await proxyAwareFetch(CLAUDE_CONFIG.oauthUsageUrl, {

@@ -40,6 +40,18 @@ export const THEME_CONFIG = {
   defaultTheme: "system", // "light" | "dark" | "system"
 };
 
+// Claude auto-ping scheduler — warms the 5h window the moment it resets
+export const CLAUDE_AUTOPING_CONFIG = {
+  settingsKey: "claudeAutoPing",
+  tickIntervalMs: 60000,
+  pingLeadMs: 5000,
+  pingModel: "claude-haiku-4-5-20251001",
+  pingText: "hi",
+  pingMaxTokens: 1,
+  refreshAheadMs: 300000,
+  fiveHourKey: "session (5h)",
+};
+
 // Subscription
 export const SUBSCRIPTION_CONFIG = {
   price: 1.0,
