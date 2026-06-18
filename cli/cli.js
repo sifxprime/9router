@@ -580,9 +580,29 @@ async function showInterfaceMenu(latestVersion) {
 const MAX_RESTARTS = 2;
 const RESTART_RESET_MS = 30000; // Reset counter if alive > 30s
 
+// First non-internal IPv4 — the address remote peers actually reach when bound to 0.0.0.0.
+function getLanIp() {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const i of ifaces || []) {
+      if (i.family === "IPv4" && !i.internal) return i.address;
+    }
+  }
+  return null;
+}
+
 function startServer(latestVersion) {
   const displayHost = host === DEFAULT_HOST ? "localhost" : host;
   const url = `http://${displayHost}:${port}/dashboard`;
+
+  // Surface real network exposure when bound to all interfaces (default 0.0.0.0).
+  // Ported from upstream — without this the user has no signal that their
+  // dashboard + API is reachable from anyone else on their LAN.
+  if (host === DEFAULT_HOST) {
+    const lanIp = getLanIp();
+    if (lanIp) {
+      console.log(`\x1b[33m⚠ Network-exposed: reachable at http://${lanIp}:${port} (bound 0.0.0.0). Use --host 127.0.0.1 for local-only.\x1b[0m`);
+    }
+  }
 
   let restartCount = 0;
   let serverStartTime = Date.now();

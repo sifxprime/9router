@@ -376,21 +376,31 @@ export default function ProviderDetailPage() {
     saveThinkingConfig(mode);
   };
 
-  const saveAutoPing = async (next) => {
-    setAutoPing(next);
+  // Per-connection auto-ping toggle. Two surfaces write this — this page AND the
+  // Usage dashboard ProviderLimits component. Both must fetch-then-patch so a
+  // toggle on one page doesn't clobber a toggle the user made on the other from
+  // a stale local cache. Mirrors the pattern in ProviderLimits/index.js.
+  const handleAutoPingConnection = async (connectionId, on) => {
+    const optimistic = { ...autoPing, connections: { ...autoPing.connections, [connectionId]: on } };
+    setAutoPing(optimistic);
     try {
+      const r = await fetch("/api/settings", { cache: "no-store" });
+      const s = r.ok ? await r.json() : {};
+      const latestCfg = s.claudeAutoPing || {};
+      const merged = {
+        ...latestCfg,
+        connections: { ...(latestCfg.connections || {}), [connectionId]: on },
+      };
       await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeAutoPing: next }),
+        body: JSON.stringify({ claudeAutoPing: merged }),
       });
+      setAutoPing({ enabled: merged.enabled === true, connections: merged.connections });
     } catch (error) {
       console.log("Error saving auto-ping config:", error);
+      setAutoPing(autoPing); // rollback to last known good
     }
-  };
-
-  const handleAutoPingConnection = (connectionId, on) => {
-    saveAutoPing({ ...autoPing, connections: { ...autoPing.connections, [connectionId]: on } });
   };
 
   useEffect(() => {
