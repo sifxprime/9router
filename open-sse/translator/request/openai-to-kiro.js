@@ -7,7 +7,7 @@ import { FORMATS } from "../formats.js";
 import { v4 as uuidv4 } from "uuid";
 import {
   resolveKiroModel,
-  isThinkingEnabled,
+  resolveKiroThinkingBudget,
   buildThinkingSystemPrefix,
   KIRO_AGENTIC_SYSTEM_PROMPT,
   resolveDefaultProfileArn
@@ -517,7 +517,14 @@ export function buildKiroPayload(model, body, stream, credentials) {
   const topP = body.top_p;
 
   const { upstream: upstreamModel, agentic, thinking: modelImpliesThinking } = resolveKiroModel(model);
-  const thinkingEnabled = modelImpliesThinking || isThinkingEnabled(body, null, model);
+  // Resolve the budget the client actually asked for (effort levels, claude
+  // budget_tokens, header beta hint, magic tag, or model-name implication).
+  // Synthetic -thinking aliases keep the default budget when the body itself
+  // doesn't specify one. Explicit "none"/"off" returns null → no prefix.
+  const explicitBudget = resolveKiroThinkingBudget(body, credentials?.rawHeaders, model);
+  const thinkingBudget = explicitBudget !== null
+    ? explicitBudget
+    : (modelImpliesThinking ? undefined /* use buildThinkingSystemPrefix default */ : null);
 
   const { history, currentMessage } = convertMessages(messages, tools, upstreamModel);
 
@@ -532,8 +539,8 @@ export function buildKiroPayload(model, body, stream, credentials) {
   // Order: thinking_mode tag first (so Kiro sees it before any user text),
   // then context/timestamp marker, then optional agentic chunked-write prompt.
   const prefixParts = [];
-  if (thinkingEnabled) {
-    prefixParts.push(buildThinkingSystemPrefix());
+  if (thinkingBudget !== null) {
+    prefixParts.push(buildThinkingSystemPrefix(thinkingBudget));
   }
   prefixParts.push(`[Context: Current time is ${timestamp}]`);
   if (agentic) {

@@ -37,6 +37,21 @@ export function resolveDefaultProfileArn(authMethod) {
 
 export const KIRO_THINKING_BUDGET_DEFAULT = 16000;
 
+// Effort-level → budget_tokens mapping. Matches upstream's
+// open-sse/translator/concerns/thinking.js LEVEL_TO_BUDGET so multi-provider
+// effort levels resolve consistently. buildThinkingSystemPrefix clamps to
+// Kiro's 1..32000 hard cap, so values above 32000 (xhigh, max) are accepted
+// here and clamped at injection time.
+export const KIRO_LEVEL_TO_BUDGET = {
+  none: 0,
+  minimal: 512,
+  low: 1024,
+  medium: 8192,
+  high: 24576,
+  xhigh: 32768,
+  max: 128000,
+};
+
 export const KIRO_AGENTIC_SYSTEM_PROMPT = `
 # CRITICAL: CHUNKED WRITE PROTOCOL (MANDATORY)
 
@@ -106,44 +121,75 @@ REMEMBER: When in doubt, write LESS per operation. Multiple small operations > o
  * @returns {boolean}
  */
 export function isThinkingEnabled(body, headers, model) {
+  return resolveKiroThinkingBudget(body, headers, model) !== null;
+}
+
+/**
+ * Resolve the Kiro thinking budget the client is actually asking for.
+ *
+ * Reads (in priority order):
+ *   - Claude `thinking.budget_tokens` (Messages API) — pass-through, clamped at injection
+ *   - Claude `output_config.effort` — mapped via KIRO_LEVEL_TO_BUDGET
+ *   - OpenAI `reasoning_effort` — mapped via KIRO_LEVEL_TO_BUDGET
+ *   - OpenAI Responses `reasoning.effort` — mapped via KIRO_LEVEL_TO_BUDGET
+ *   - Anthropic-Beta header `interleaved-thinking` — KIRO_THINKING_BUDGET_DEFAULT
+ *   - System prompt `<thinking_mode>enabled</thinking_mode>` (AMP/Cursor) — default
+ *   - Model name contains "thinking" or "-reason" — default
+ *
+ * Explicit "none"/"off"/"disabled" wins and returns null (no prefix injected).
+ * Returns null if no thinking intent detected. Returns a number otherwise;
+ * buildThinkingSystemPrefix performs Kiro's final 1..32000 clamp.
+ *
+ * Port of upstream 2ff1124 (fix(kiro): honor thinking effort budgets) adapted
+ * for our tree — upstream imports extractThinking from translator/concerns/
+ * which is Wave 2 refactor territory, so logic is inlined here.
+ *
+ * @param {object} body OpenAI/Claude-shaped request body
+ * @param {object} [headers] Original inbound HTTP headers (case-insensitive)
+ * @param {string} [model] Model id the caller asked for
+ * @returns {number|null} budget to inject, or null when thinking is disabled
+ */
+export function resolveKiroThinkingBudget(body, headers, model) {
+  if (body && typeof body === "object") {
+    // Claude Messages API — explicit budget_tokens takes precedence
+    const thinking = body.thinking;
+    if (thinking && typeof thinking === "object") {
+      if (thinking.type === "disabled" || thinking.type === "off" || thinking.type === "none") return null;
+      const tokens = Number(thinking.budget_tokens);
+      if (Number.isFinite(tokens) && tokens > 0) return tokens;
+      if (thinking.type === "enabled") return KIRO_THINKING_BUDGET_DEFAULT;
+    }
+
+    // Effort-level (Claude output_config.effort, OpenAI reasoning_effort, OpenAI Responses reasoning.effort)
+    const effort = body.output_config?.effort
+      ?? body.reasoning_effort
+      ?? (body.reasoning && typeof body.reasoning === "object" ? body.reasoning.effort : null);
+    if (typeof effort === "string" && effort) {
+      const v = effort.toLowerCase();
+      if (v === "none" || v === "off" || v === "disabled") return null;
+      if (Object.prototype.hasOwnProperty.call(KIRO_LEVEL_TO_BUDGET, v)) {
+        const mapped = KIRO_LEVEL_TO_BUDGET[v];
+        return mapped === 0 ? null : mapped;
+      }
+      if (v === "auto") return KIRO_THINKING_BUDGET_DEFAULT;
+    }
+  }
+
   if (headers) {
     const beta = pickHeader(headers, "anthropic-beta");
     if (typeof beta === "string" && beta.toLowerCase().includes("interleaved-thinking")) {
-      return true;
+      return KIRO_THINKING_BUDGET_DEFAULT;
     }
   }
 
-  if (body && typeof body === "object") {
-    const thinking = body.thinking;
-    if (thinking && typeof thinking === "object" && thinking.type === "enabled") {
-      const budget = Number(thinking.budget_tokens);
-      if (!Number.isFinite(budget) || budget > 0) {
-        return true;
-      }
-    }
-
-    const effort = body.reasoning_effort
-      ?? (body.reasoning && typeof body.reasoning === "object" ? body.reasoning.effort : null);
-    if (typeof effort === "string") {
-      const v = effort.toLowerCase();
-      if (v && v !== "none" && (v === "low" || v === "medium" || v === "high" || v === "auto")) {
-        return true;
-      }
-    }
-
-    if (containsThinkingModeTag(body)) {
-      return true;
-    }
-  }
+  if (containsThinkingModeTag(body)) return KIRO_THINKING_BUDGET_DEFAULT;
 
   if (typeof model === "string" && model) {
     const m = model.toLowerCase();
-    if (m.includes("thinking") || m.includes("-reason")) {
-      return true;
-    }
+    if (m.includes("thinking") || m.includes("-reason")) return KIRO_THINKING_BUDGET_DEFAULT;
   }
 
-  return false;
+  return null;
 }
 
 /**
