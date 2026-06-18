@@ -1,7 +1,8 @@
 // Re-export from open-sse with localDb integration
 import { getModelAliases, getComboByName, getProviderNodes } from "@/lib/localDb";
 import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
-import REGISTRY from "open-sse/providers/registry/index.js";
+import { PROVIDERS } from "open-sse/config/providers.js";
+import { PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
 
 // Local provider alias overrides (HMR-friendly, applied on top of open-sse map)
 const LOCAL_PROVIDER_ALIASES = {
@@ -9,12 +10,21 @@ const LOCAL_PROVIDER_ALIASES = {
   "xiaomi-tokenplan": "xiaomi-tokenplan",
 };
 
-const RESERVED_PROVIDER_PREFIXES = new Set(Object.keys(LOCAL_PROVIDER_ALIASES));
-for (const entry of REGISTRY) {
-  RESERVED_PROVIDER_PREFIXES.add(entry.id);
-  if (entry.alias) RESERVED_PROVIDER_PREFIXES.add(entry.alias);
-  for (const alias of entry.aliases || []) RESERVED_PROVIDER_PREFIXES.add(alias);
-}
+// Built-in provider prefixes that must not be shadowed by a user-defined
+// compatible-node prefix. Built from PROVIDERS (canonical ids), all known
+// short aliases (cc, cx, kr, ...), and local alias overrides.
+//
+// Port of upstream 047fdc8 (fix(image): prevent compatible nodes from
+// shadowing provider aliases). Upstream sources its set from REGISTRY in
+// open-sse/providers/registry/ which is Wave 2 refactor territory and doesn't
+// exist in our tree — we use the equivalent providers.js + providerModels.js
+// pair already in our tree.
+const RESERVED_PROVIDER_PREFIXES = new Set([
+  ...Object.keys(LOCAL_PROVIDER_ALIASES),
+  ...Object.keys(PROVIDERS),
+  ...Object.keys(PROVIDER_ID_TO_ALIAS),
+  ...Object.values(PROVIDER_ID_TO_ALIAS),
+]);
 
 export function parseModel(modelStr) {
   const parsed = parseModelCore(modelStr);

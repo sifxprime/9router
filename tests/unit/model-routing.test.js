@@ -42,19 +42,23 @@ describe("model routing", () => {
     const ctx = await setupDb();
     cleanup = ctx.cleanup;
 
+    // Try to shadow the built-in Claude alias `cc` with a user-defined
+    // compatible node carrying the same prefix. The reserved-prefix guard
+    // (047fdc8 port) must keep `cc/...` routed to the built-in Claude
+    // provider, not the user's node.
     await ctx.createProviderNode({
       id: "openai-compatible-chat-test",
       type: "openai-compatible",
-      name: "Compatible CF Collision",
-      prefix: "cf",
+      name: "Compatible CC Collision",
+      prefix: "cc",
       apiType: "chat",
       baseUrl: "https://compatible.test/v1",
     });
 
-    await expect(ctx.getModelInfo("cf/@cf/black-forest-labs/flux-2-klein-9b"))
+    await expect(ctx.getModelInfo("cc/claude-sonnet-4-7"))
       .resolves.toEqual({
-        provider: "cloudflare-ai",
-        model: "@cf/black-forest-labs/flux-2-klein-9b",
+        provider: "claude",
+        model: "claude-sonnet-4-7",
       });
   });
 
