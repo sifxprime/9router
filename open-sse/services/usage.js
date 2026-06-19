@@ -499,11 +499,43 @@ async function getAntigravitySubscriptionInfo(accessToken, proxyOptions = null) 
   }
 }
 
+// Anthropic's OAuth-usage endpoint rate-limits aggressively and per-IP. The
+// Quota Tracker page polls every 60s × N connections and claudeAutoPing polls
+// every 60s — together this trips 429s in seconds, blanking out the entire
+// Claude card for both accounts until the IP-level window relaxes.
+//
+// Two-tier in-mem cache fixes it without losing data quality:
+//   * lastGoodCache (per token) — stores the most recent SUCCESSFUL response.
+//     Returned during cooldown so the user keeps seeing real numbers instead
+//     of "rate-limited" placeholder.
+//   * cooldownUntil (per token) — when a 429 lands, set a 3-minute window
+//     during which we don't even bother calling Anthropic. After that we try
+//     again. If lastGoodCache exists, the user sees fresh-ish data; if not,
+//     they see the rate-limit message.
+const CLAUDE_USAGE_COOLDOWN_MS = 180000;  // 3 minutes
+const CLAUDE_USAGE_GOOD_TTL_MS = 60000;   // serve cached "good" up to 60s old
+const claudeUsageCooldownUntil = new Map();
+const claudeUsageLastGood = new Map();
+
 /**
  * Claude Usage - Primary: OAuth endpoint, Fallback: legacy settings/org endpoint
  */
 export async function getClaudeUsage(accessToken, proxyOptions = null) {
   try {
+    // Cooldown path: don't even ping Anthropic if we recently got a 429 on
+    // ANY token. Prefer cached-good for THIS token, else the cooldown message.
+    const cooldownUntil = claudeUsageCooldownUntil.get(accessToken);
+    if (cooldownUntil && Date.now() < cooldownUntil) {
+      const lastGood = claudeUsageLastGood.get(accessToken);
+      if (lastGood && Date.now() - lastGood.at < CLAUDE_USAGE_GOOD_TTL_MS + CLAUDE_USAGE_COOLDOWN_MS) {
+        return { ...lastGood.data, fromCache: true };
+      }
+      const secondsLeft = Math.ceil((cooldownUntil - Date.now()) / 1000);
+      return {
+        message: `Claude connected. Usage API rate-limited (HTTP 429) — retrying in ~${secondsLeft}s.`,
+      };
+    }
+
     // Primary: OAuth usage endpoint (Claude Code consumer OAuth tokens)
     const oauthResponse = await proxyAwareFetch(CLAUDE_CONFIG.oauthUsageUrl, {
       method: "GET",
@@ -513,6 +545,13 @@ export async function getClaudeUsage(accessToken, proxyOptions = null) {
         "anthropic-version": CLAUDE_CONFIG.apiVersion,
       },
     }, proxyOptions);
+
+    // Stamp the cooldown ON 429 so we stop hammering the endpoint immediately.
+    if (oauthResponse.status === 429) {
+      claudeUsageCooldownUntil.set(accessToken, Date.now() + CLAUDE_USAGE_COOLDOWN_MS);
+      const lastGood = claudeUsageLastGood.get(accessToken);
+      if (lastGood) return { ...lastGood.data, fromCache: true };
+    }
 
     if (oauthResponse.ok) {
       const data = await oauthResponse.json();
@@ -551,11 +590,15 @@ export async function getClaudeUsage(accessToken, proxyOptions = null) {
         }
       }
 
-      return {
+      const result = {
         plan: "Claude Code",
         extraUsage: data.extra_usage ?? null,
         quotas,
       };
+      // Cache the successful response per-token so we can serve it as
+      // stale-while-revalidate during the next 429 cooldown.
+      claudeUsageLastGood.set(accessToken, { at: Date.now(), data: result });
+      return result;
     }
 
     // Fallback: legacy settings + org usage endpoint. Carry the OAuth status so
