@@ -185,20 +185,55 @@ export class AntigravityExecutor extends BaseExecutor {
     return null;
   }
 
-  // Parse retry time from Antigravity error message body
-  // Format: "Your quota will reset after 2h7m23s" or "1h30m" or "45m" or "30s"
+  // Parse retry time from Antigravity error message body.
+  // Handles multiple Google/Antigravity quota-exhausted message variants:
+  //   "Your quota will reset after 2h7m23s"  ← old format
+  //   "Resets in 1h13m26s."                  ← current Google format (Jun 2026)
+  //   "Quota resets in 45m30s"               ← Antigravity beta variant
+  //   "available in 30s"                     ← some token-bucket responses
+  //   "1h30m" / "45m" / "30s"                ← bare durations
   parseRetryFromErrorMessage(errorMessage) {
     if (!errorMessage || typeof errorMessage !== "string") return null;
-
-    const match = errorMessage.match(/reset after (\d+h)?(\d+m)?(\d+s)?/i);
+    // Anchor on common verbs, then capture the duration. Each verb keyword
+    // is followed by optional "after" / "in" preposition and the duration.
+    const match = errorMessage.match(/(?:reset|resets|reset in|available)\s+(?:after|in)?\s*(\d+h)?\s*(\d+m)?\s*(\d+s)?/i)
+      || errorMessage.match(/(\d+h)\s*(\d+m)?\s*(\d+s)?/i);
     if (!match) return null;
 
     let totalMs = 0;
-    if (match[1]) totalMs += parseInt(match[1]) * 3600 * 1000; // hours
-    if (match[2]) totalMs += parseInt(match[2]) * 60 * 1000; // minutes
-    if (match[3]) totalMs += parseInt(match[3]) * 1000; // seconds
+    if (match[1]) totalMs += parseInt(match[1]) * 3600 * 1000;
+    if (match[2]) totalMs += parseInt(match[2]) * 60 * 1000;
+    if (match[3]) totalMs += parseInt(match[3]) * 1000;
 
     return totalMs > 0 ? totalMs : null;
+  }
+
+  // Parse canonical RetryInfo from Google's RPC error details[] array.
+  // Shape: { error: { details: [ { "@type": "...RetryInfo", "retryDelay": "4406.752244244s" }, ... ] } }
+  // This is more reliable than message-text parsing — it's the machine-readable
+  // field Google itself publishes. Try it FIRST before the text fallback.
+  parseRetryFromErrorJson(errorJson) {
+    const details = errorJson?.error?.details || errorJson?.details;
+    if (!Array.isArray(details)) return null;
+    for (const d of details) {
+      const t = d?.["@type"] || "";
+      // Match google.rpc.RetryInfo
+      if (t.includes("RetryInfo")) {
+        const delay = d.retryDelay;
+        if (typeof delay === "string") {
+          // Format: "4406.752244244s" — seconds + decimal
+          const m = delay.match(/^([\d.]+)s$/);
+          if (m) return Math.ceil(parseFloat(m[1]) * 1000);
+        }
+        // Or { seconds: N, nanos: N } proto form
+        if (delay && typeof delay === "object") {
+          const sec = Number(delay.seconds || 0);
+          const nano = Number(delay.nanos || 0);
+          if (sec > 0 || nano > 0) return sec * 1000 + Math.ceil(nano / 1e6);
+        }
+      }
+    }
+    return null;
   }
 
   async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
@@ -241,8 +276,15 @@ export class AntigravityExecutor extends BaseExecutor {
             try {
               const errorBody = await response.clone().text();
               const errorJson = JSON.parse(errorBody);
-              const errorMessage = errorJson?.error?.message || errorJson?.message || "";
-              retryMs = this.parseRetryFromErrorMessage(errorMessage);
+              // Prefer the canonical RetryInfo.retryDelay from details[] (machine
+              // readable) — Google sends "4406.752244244s" there even when the
+              // human-text message phrasing changes. Fall back to message-text
+              // parsing only when the structured field is missing.
+              retryMs = this.parseRetryFromErrorJson(errorJson);
+              if (!retryMs) {
+                const errorMessage = errorJson?.error?.message || errorJson?.message || "";
+                retryMs = this.parseRetryFromErrorMessage(errorMessage);
+              }
             } catch (e) {
               // Ignore parse errors, will fall back to exponential backoff
             }
