@@ -206,7 +206,14 @@ function safeArgsString(value) {
  * A user turn can contain:
  *   - plain text content  → { role:"user", content }
  *   - toolResults only    → one { role:"tool", tool_call_id, content } per result
- *   - both                → tool messages first, then the user text message
+ *   - images attachments  → preserved as OpenAI image_url content blocks
+ *   - combinations of the above
+ *
+ * IMPORTANT: When the user attaches images in Kiro IDE, they arrive in
+ * `userInputMessage.images = [{ format: "jpeg|png|gif|webp", source: { bytes: <base64> } }]`.
+ * Without explicit handling here, MITM was silently dropping every image — the
+ * downstream model only ever saw the text. Now images are converted to the
+ * standard OpenAI multimodal content shape so vision-capable models work too.
  */
 function convertUserInputMessage(uim) {
   const out = [];
@@ -222,10 +229,38 @@ function convertUserInputMessage(uim) {
     });
   }
 
-  // Emit user text only if it exists alongside OR when there are no tool results
+  // Preserve images: AWS CodeWhisperer { format, source.bytes(base64) } →
+  // OpenAI { type:"image_url", image_url:{ url: "data:image/<fmt>;base64,..." } }
+  const images = Array.isArray(uim.images) ? uim.images : [];
+  const imageContent = [];
+  for (const img of images) {
+    const bytes = img?.source?.bytes;
+    if (!bytes) continue;
+    const fmt = (img?.format || "png").toLowerCase();
+    // Whitelist to known image MIME-mappable formats; ignore anything else
+    // so a malformed attachment can't crash the converter.
+    const knownFormats = new Set(["png", "jpeg", "jpg", "gif", "webp"]);
+    const mime = knownFormats.has(fmt) ? `image/${fmt === "jpg" ? "jpeg" : fmt}` : "image/png";
+    imageContent.push({
+      type: "image_url",
+      image_url: { url: `data:${mime};base64,${bytes}` },
+    });
+  }
+
   const text = (uim.content || "").trim();
-  if (text || toolResults.length === 0) {
-    out.push({ role: "user", content: text });
+  // Emit a user message when there is text, when there are images, or when
+  // this user turn has no tool results (to keep an empty placeholder turn
+  // that some providers expect after the tool block).
+  if (text || imageContent.length > 0 || toolResults.length === 0) {
+    if (imageContent.length > 0) {
+      // OpenAI multimodal content array: text part (if any) + image parts
+      const content = [];
+      if (text) content.push({ type: "text", text });
+      content.push(...imageContent);
+      out.push({ role: "user", content });
+    } else {
+      out.push({ role: "user", content: text });
+    }
   }
 
   return out;

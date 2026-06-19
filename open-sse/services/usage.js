@@ -558,9 +558,11 @@ export async function getClaudeUsage(accessToken, proxyOptions = null) {
       };
     }
 
-    // Fallback: legacy settings + org usage endpoint
+    // Fallback: legacy settings + org usage endpoint. Carry the OAuth status so
+    // the legacy handler can give an accurate reason if it also fails (429 vs
+    // 401 vs admin-required are very different things to a user).
     console.warn(`[Claude Usage] OAuth endpoint returned ${oauthResponse.status}, falling back to legacy`);
-    return await getClaudeUsageLegacy(accessToken, proxyOptions);
+    return await getClaudeUsageLegacy(accessToken, proxyOptions, oauthResponse.status);
   } catch (error) {
     return { message: `Claude connected. Unable to fetch usage: ${error.message}` };
   }
@@ -568,8 +570,12 @@ export async function getClaudeUsage(accessToken, proxyOptions = null) {
 
 /**
  * Legacy Claude usage for API key / org admin users
+ * @param {number} [oauthStatus] HTTP status the OAuth usage endpoint returned
+ *   before falling back. Used to give the user the correct reason when BOTH
+ *   endpoints fail: 429 → rate limited (not a permissions problem); other
+ *   non-200 → defer to legacy's own outcome.
  */
-async function getClaudeUsageLegacy(accessToken, proxyOptions = null) {
+async function getClaudeUsageLegacy(accessToken, proxyOptions = null, oauthStatus = null) {
   try {
     const settingsResponse = await proxyAwareFetch(CLAUDE_CONFIG.settingsUrl, {
       method: "GET",
@@ -612,7 +618,18 @@ async function getClaudeUsageLegacy(accessToken, proxyOptions = null) {
       };
     }
 
-    return { message: "Claude connected. Usage API requires admin permissions." };
+    // Tell the user the real reason. "admin permissions" was misleading when
+    // the OAuth endpoint was actually rate-limited (429) or 401 (token issue).
+    if (oauthStatus === 429) {
+      return { message: "Claude connected. Usage API rate-limited (HTTP 429) — quota will refresh automatically." };
+    }
+    if (oauthStatus === 401) {
+      return { message: "Claude connected. Usage API rejected the access token (HTTP 401) — try reconnecting Claude." };
+    }
+    if (oauthStatus && oauthStatus >= 500) {
+      return { message: `Claude connected. Usage API upstream error (HTTP ${oauthStatus}) — typically transient.` };
+    }
+    return { message: "Claude connected. Usage API requires admin permissions on this token." };
   } catch (error) {
     return { message: `Claude connected. Unable to fetch usage: ${error.message}` };
   }
