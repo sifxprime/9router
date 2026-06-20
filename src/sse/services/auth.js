@@ -1,6 +1,7 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, updateProviderConnectionAtomic, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
+import { rankConnections, scoreOf } from "@/shared/services/connectionHealth";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import * as log from "../utils/logger.js";
@@ -152,8 +153,17 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         });
       }
     } else {
-      // Default: fill-first (already sorted by priority in getProviderConnections)
-      connection = availableConnections[0];
+      // Default: fill-first, BUT re-rank by observed health within the same
+      // priority tier. Connections that have been consistently fast and
+      // successful in recent traffic float to the top so the user never has
+      // to manually reorder accounts when one starts degrading.
+      // For brand-new / never-observed connections the rank is neutral so
+      // priority-set order is preserved exactly as before.
+      const ranked = rankConnections(availableConnections);
+      connection = ranked[0];
+      if (ranked[0] !== availableConnections[0]) {
+        log.debug("AUTH", `${provider} | health re-rank promoted ${connection.id?.slice(0, 8)} (score ${scoreOf(connection.id).toFixed(0)}) over ${availableConnections[0].id?.slice(0, 8)} (score ${scoreOf(availableConnections[0].id).toFixed(0)})`);
+      }
     }
 
     const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});

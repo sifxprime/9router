@@ -15,6 +15,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { handleComboChat, handleFusionChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
+import { recordOutcome } from "@/shared/services/connectionHealth";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
@@ -238,6 +239,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     // Use shared chatCore — settings was passed in from handleChat (read once per request)
     const providerThinking = (settings.providerThinking || {})[provider] || null;
+    const requestStartedAtMs = Date.now();
     const result = await handleChatCore({
       body: { ...body, model: `${provider}/${model}` },
       modelInfo: { provider, model },
@@ -265,6 +267,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         await clearAccountError(credentials.connectionId, credentials, model);
       }
     });
+
+    // Record health observation for this connection (used by the auth picker's
+    // smart re-rank). Counts a successful upstream response and tracks the
+    // wall-clock latency so consistently-fast accounts float to the top.
+    recordOutcome(credentials.connectionId, !!result.success, Date.now() - requestStartedAtMs);
 
     if (result.success) return result.response;
 
