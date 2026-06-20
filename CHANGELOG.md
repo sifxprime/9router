@@ -1,3 +1,51 @@
+# v0.5.14 (2026-06-21) — Combo fallback speed + MITM stability + Auth loop fixes
+
+Four major fixes addressing live user reports. Combos are now up to 15x
+faster when hitting exhausted accounts, MITM restart loops are eliminated,
+and live-fetch models correctly surface for free providers.
+
+## Performance
+- **Fast-fail combo routing for dead accounts (<1s vs 25s)**. Combos hitting
+  multiple exhausted accounts (e.g. 403 "Verify your account" or 429 quota
+  with long reset times) used to take 25+ seconds to fail over to a healthy
+  provider due to pointless token refreshes and exponential backoff.
+  - **Fix A (Token Refresh Skip):** `chatCore.js` now peeks at 403 bodies.
+    If it sees "verify your account" / "permission_denied", it skips the
+    OAuth token refresh entirely. Saves ~3s per dead account.
+  - **Fix B (Pre-emptive 429 Parse):** `base.js` executor now checks the
+    provider's `RetryInfo` *before* initiating exponential backoff. If the
+    reset is >60s away, it skips the 14s retry loop and fails instantly.
+    Saves ~14s per exhausted account.
+  Result: A combo hitting 3 dead accounts now falls over to a healthy model
+  in under 1 second. Applies to ALL providers and ALL combo strategies.
+
+## Bug fixes
+- **Infinite MITM restart loop eliminated.** Toggling MITM off/on could race
+  with a queued background restart, causing an infinite loop of `Restart
+  attempt 1/5 failed: MITM server is already running` every 5 seconds. Added
+  a strict `!serverProcess.killed` guard to `scheduleMitmRestart()` to quietly
+  drop stale restart requests.
+- **Actionable 403 "Verify your account" dashboard links.** When Google flags
+  an Antigravity account, kRouter now uses regex to extract the exact Google
+  verification URL from the 403 body. The dashboard Connection card now
+  displays `Verify your account: https://...` as a clickable link instead of
+  raw truncated JSON.
+- **Claude OAuth + Live Fetch Anti-Loop.** If Claude Desktop MITM was enabled,
+  kRouter's own internal requests to `api.anthropic.com` (OAuth token exchange
+  and provider model fetching) would hit its own MITM proxy and fail with
+  `SELF_SIGNED_CERT_IN_CHAIN`. All internal OAuth and model fetches now pass
+  the `x-request-source: local` header, bypassing the MITM intercept.
+- **Live-fetch for free/passthrough providers (Issue 2).** Users with ONLY
+  free providers (MiMo Free, OpenCode Free, OpenRouter, etc.) saw the "Select
+  Model" modal open completely blank. `ModelSelectModal` now kicks off
+  parallel background fetches to `/api/models/live` when opened, populating
+  the dropdowns instantly. Includes 5-min LRU cache and inline retry buttons.
+
+## Verified
+- Full test suite: 605 pass / 20 expected-fail / 27 fail (baseline maintained)
+- Combo fast-fail logic unit-tested against real provider error bodies
+- MITM anti-loop tested live via Claude Desktop
+
 # v0.5.13 (2026-06-20) — Linux GUI launcher coverage for MITM cert trust
 
 ## Bug fix
