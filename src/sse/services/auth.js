@@ -216,13 +216,13 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     const backoffLevel = existing?.backoffLevel || 0;
     connName = existing?.displayName || existing?.name || existing?.email || connName;
 
-    let shouldFallback, cooldownMs, newBackoffLevel;
+    let shouldFallback, cooldownMs, newBackoffLevel, accountLock;
     if (resetsAtMs && resetsAtMs > Date.now()) {
       shouldFallback = true;
       cooldownMs = Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
       newBackoffLevel = 0;
     } else {
-      ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
+      ({ shouldFallback, cooldownMs, newBackoffLevel, accountLock } = checkFallbackError(status, errorText, backoffLevel));
     }
 
     if (!shouldFallback) {
@@ -230,9 +230,15 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       return null; // no DB write
     }
 
-    const lockUpdate = buildModelLockUpdate(model, cooldownMs);
+    // accountLock=true (e.g. "Verify your account" 403) → lock ALL models on this
+    // account for the cooldown period. No point trying any model — the whole account
+    // needs human intervention. Uses modelLock___all which isModelLockActive() checks
+    // as a fallback for any model, so the account is skipped entirely by the picker.
+    const lockUpdate = accountLock
+      ? buildModelLockUpdate(null, cooldownMs)   // null → modelLock___all
+      : buildModelLockUpdate(model, cooldownMs);
     lockKey = Object.keys(lockUpdate)[0];
-    outcome = { shouldFallback: true, cooldownMs };
+    outcome = { shouldFallback: true, cooldownMs, accountLock: accountLock || false };
 
     return {
       ...lockUpdate,
@@ -245,7 +251,8 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   });
 
   if (merged && outcome.shouldFallback) {
-    log.warn("AUTH", `${connName} locked ${lockKey} for ${Math.round(outcome.cooldownMs / 1000)}s [${status}]`);
+    const lockLabel = outcome.accountLock ? "WHOLE ACCOUNT" : lockKey;
+    log.warn("AUTH", `${connName} locked ${lockLabel} for ${Math.round(outcome.cooldownMs / 1000)}s [${status}]`);
     if (provider && status && reason) {
       console.error(`❌ ${provider} [${status}]: ${reason}`);
     }

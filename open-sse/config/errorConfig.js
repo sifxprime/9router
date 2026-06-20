@@ -41,6 +41,11 @@ export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
 // Hard cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h)
 export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
 
+// Cooldown for Google "Verify your account" 403. The whole account needs human
+// intervention — lock ALL models on the account for 1hr so no further requests
+// are wasted on it. Auto-clears after 1hr OR when user clicks "Test connection".
+export const ACCOUNT_VERIFY_COOLDOWN_MS = 60 * 60 * 1000;
+
 // Cooldown durations (ms)
 const COOLDOWN = {
   long: 2 * 60 * 1000,
@@ -58,14 +63,19 @@ const COOLDOWN = {
  */
 export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
-  { text: "no credentials",           cooldownMs: COOLDOWN.long },
-  { text: "request not allowed",      cooldownMs: COOLDOWN.short },
+  // "Verify your account" = Google anti-abuse 403. Lock the WHOLE account (all
+  // models) for 1hr — flagged by accountLock:true so auth.js uses modelLock___all
+  // instead of per-model lock. No point retrying any model on this account until
+  // the user clicks the verification link Google emailed them.
+  { text: "verify your account",       cooldownMs: ACCOUNT_VERIFY_COOLDOWN_MS, accountLock: true },
+  { text: "no credentials",            cooldownMs: COOLDOWN.long },
+  { text: "request not allowed",       cooldownMs: COOLDOWN.short },
   { text: "improperly formed request", cooldownMs: COOLDOWN.long },
-  { text: "rate limit",               backoff: true },
-  { text: "too many requests",        backoff: true },
-  { text: "quota exceeded",           backoff: true },
-  { text: "capacity",                 backoff: true },
-  { text: "overloaded",               backoff: true },
+  { text: "rate limit",                backoff: true },
+  { text: "too many requests",         backoff: true },
+  { text: "quota exceeded",            backoff: true },
+  { text: "capacity",                  backoff: true },
+  { text: "overloaded",                backoff: true },
 
   // --- Status-based rules (fallback when text doesn't match) ---
   { status: 401, cooldownMs: COOLDOWN.long },
