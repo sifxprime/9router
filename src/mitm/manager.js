@@ -16,6 +16,9 @@ const { isCertExpired } = require("./cert/rootCA");
 const { DATA_DIR, MITM_DIR } = require("./paths");
 const { log, err } = require("./logger");
 const { LSOF_BIN } = require("./config");
+const { setLinuxNodeExtraCaCerts, unsetLinuxNodeExtraCaCerts } = require("./linuxNodeCaCerts");
+
+const IS_LINUX = process.platform === "linux";
 
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 
@@ -635,7 +638,11 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
     mitmLastStartTime = Date.now();
   }
 
-  // Set NODE_EXTRA_CA_CERTS so Node-based GUI apps (Electron/AG language_server) trust MITM cert
+  // Set NODE_EXTRA_CA_CERTS so Node-based GUI apps (Electron / Antigravity
+  // language_server / VS Code extensions / Claude Desktop on Linux) trust
+  // MITM cert. Node ignores the OS trust store and reads its own bundled
+  // Mozilla CA list — without this, system curl works but Node-based apps
+  // reject our cert with 'x509: certificate signed by unknown authority'.
   if (IS_MAC) {
     const rootCAPath = path.join(MITM_DIR, "rootCA.crt");
     if (fs.existsSync(rootCAPath)) {
@@ -651,6 +658,21 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
         if (e) log(`[setx] Failed to set NODE_EXTRA_CA_CERTS: ${e.message}`);
         else log(`[setx] NODE_EXTRA_CA_CERTS set for current user`);
       });
+    }
+  } else if (IS_LINUX) {
+    const rootCAPath = path.join(MITM_DIR, "rootCA.crt");
+    if (fs.existsSync(rootCAPath)) {
+      try {
+        const written = setLinuxNodeExtraCaCerts(rootCAPath);
+        if (written.length > 0) {
+          log(`[linux-node-ca] NODE_EXTRA_CA_CERTS written to ${written.length} shell rc file(s): ${written.map(p => p.replace(os.homedir(), "~")).join(", ")}`);
+          log(`[linux-node-ca] ⚠ Effective in NEW shells only — restart your IDE (Antigravity / Claude Desktop / VS Code) OR run: source ~/.profile`);
+        } else {
+          log(`[linux-node-ca] NODE_EXTRA_CA_CERTS already set, no changes needed`);
+        }
+      } catch (e) {
+        log(`[linux-node-ca] Failed to set NODE_EXTRA_CA_CERTS in shell rc: ${e.message}`);
+      }
     }
   }
 
@@ -776,6 +798,15 @@ async function stopServer(sudoPassword) {
       if (e) log(`[reg] Failed to unset NODE_EXTRA_CA_CERTS: ${e.message}`);
       else log(`[reg] NODE_EXTRA_CA_CERTS unset`);
     });
+  } else if (IS_LINUX) {
+    try {
+      const removed = unsetLinuxNodeExtraCaCerts();
+      if (removed.length > 0) {
+        log(`[linux-node-ca] NODE_EXTRA_CA_CERTS removed from ${removed.length} shell rc file(s)`);
+      }
+    } catch (e) {
+      log(`[linux-node-ca] Failed to unset NODE_EXTRA_CA_CERTS: ${e.message}`);
+    }
   }
 
   try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
