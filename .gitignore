@@ -75,3 +75,4 @@ gitbook/README.md
 
 # npm credentials — never commit (use ~/.npmrc instead)
 .npmrc
+CLAUDE_HANDOFF.md
