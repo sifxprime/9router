@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addProviderConnection, getProviderConnections } from "@/lib/localDb";
+import { createProviderConnection, getProviderConnections } from "@/lib/localDb";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -65,15 +65,16 @@ export async function POST(request) {
           continue;
         }
 
-        await addProviderConnection({
+        await createProviderConnection({
           provider,
           name: connectionName,
-          apiKey: accessToken,
+          authType: "access_token",
+          accessToken,
           refreshToken: refreshToken || null,
+          email,
           isActive: true,
           providerSpecificData: {
             importedFrom: "cli-proxy-api",
-            email,
             planType: authJson.plan_type || authJson.chatgpt_plan_type || "",
           },
         });
