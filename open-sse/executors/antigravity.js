@@ -298,6 +298,15 @@ export class AntigravityExecutor extends BaseExecutor {
             continue;
           }
 
+          // Fast-fail: if the provider tells us the quota reset is hours/days
+          // away, do not waste 14 seconds spinning in the auto-retry loop below.
+          if (retryMs && retryMs > MAX_RETRY_AFTER_MS) {
+            log?.debug?.("RETRY", `${response.status}, Retry-After too long (${Math.ceil(retryMs / 1000)}s), trying fallback`);
+            lastStatus = response.status;
+            if (urlIndex + 1 < fallbackCount) continue;
+            // End of line, fall through to default error handler
+          }
+
           // Auto retry only for 429 when retryMs is 0 or undefined
           if (response.status === HTTP_STATUS.RATE_LIMITED && (!retryMs || retryMs === 0) && retryAttemptsByUrl[urlIndex] < MAX_AUTO_RETRIES) {
             retryAttemptsByUrl[urlIndex]++;
@@ -307,13 +316,10 @@ export class AntigravityExecutor extends BaseExecutor {
             await new Promise(resolve => setTimeout(resolve, backoffMs));
             urlIndex--;
             continue;
-          }
-
-          log?.debug?.("RETRY", `${response.status}, Retry-After ${retryMs ? `too long (${Math.ceil(retryMs / 1000)}s)` : 'missing'}, trying fallback`);
-          lastStatus = response.status;
-
-          if (urlIndex + 1 < fallbackCount) {
-            continue;
+          } else if (response.status === HTTP_STATUS.RATE_LIMITED || response.status === HTTP_STATUS.SERVICE_UNAVAILABLE) {
+            log?.debug?.("RETRY", `${response.status}, Retry-After missing, trying fallback`);
+            lastStatus = response.status;
+            if (urlIndex + 1 < fallbackCount) continue;
           }
         }
 

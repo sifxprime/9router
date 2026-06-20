@@ -111,9 +111,27 @@ export class BaseExecutor {
     const retryConfig = { ...DEFAULT_RETRY_CONFIG, ...this.config.retry };
 
     // Schedule retry via retryConfig[statusKey]. Returns true when caller should `urlIndex--; continue`
-    const tryRetry = async (urlIndex, statusKey, reason) => {
+    const tryRetry = async (urlIndex, statusKey, reason, response = null) => {
       const { attempts, delayMs } = resolveRetryEntry(retryConfig[statusKey]);
       if (attempts <= 0 || retryAttemptsByUrl[urlIndex] >= attempts) return false;
+
+      // Fast-fail on 429 quota exhaustion: if the reset is more than 60s away,
+      // a 2-8s exponential backoff retry is pointless. Parse the error early
+      // and skip retries if the provider tells us it's a long lockout.
+      if (response && response.status === HTTP_STATUS.RATE_LIMITED && typeof this.parseError === "function") {
+        try {
+          const bodyText = await response.clone().text();
+          const parsed = this.parseError(response, bodyText);
+          if (parsed?.resetsAtMs) {
+            const timeToResetMs = parsed.resetsAtMs - Date.now();
+            if (timeToResetMs > 60000) {
+              log?.debug?.("RETRY", `${reason}, Retry-After too long (${Math.ceil(timeToResetMs / 1000)}s), skipping retry`);
+              return false;
+            }
+          }
+        } catch { /* ignore parse error, proceed to retry */ }
+      }
+
       retryAttemptsByUrl[urlIndex]++;
       log?.debug?.("RETRY", `${reason} retry ${retryAttemptsByUrl[urlIndex]}/${attempts} after ${delayMs / 1000}s`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -148,7 +166,7 @@ export class BaseExecutor {
         const cl = response.headers?.get?.("content-length") || "?";
         dbg("FETCH", `${this.provider.toUpperCase()} ← ${response.status} | ttft=${Date.now() - fetchT0}ms | ct=${ct} | cl=${cl}`);
 
-        if (await tryRetry(urlIndex, response.status, `status ${response.status}`)) { urlIndex--; continue; }
+        if (await tryRetry(urlIndex, response.status, `status ${response.status}`, response)) { urlIndex--; continue; }
 
         if (this.shouldRetry(response.status, urlIndex)) {
           log?.debug?.("RETRY", `${response.status} on ${url}, trying fallback ${urlIndex + 1}`);
