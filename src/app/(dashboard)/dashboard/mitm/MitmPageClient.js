@@ -5,6 +5,7 @@ import { MITM_TOOLS } from "@/shared/constants/cliTools";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { MitmServerCard, MitmToolCard } from "@/app/(dashboard)/dashboard/cli-tools/components";
+import CertManagementCard from "./CertManagementCard";
 
 export default function MitmPageClient() {
   const [connections, setConnections] = useState([]);
@@ -95,6 +96,9 @@ export default function MitmPageClient() {
         cloudEnabled={cloudEnabled}
         onStatusChange={setMitmStatus}
       />
+
+      {/* Root certificate install / uninstall */}
+      <CertManagementCard />
 
       {/* Tool Cards */}
       <div className="grid gap-3 sm:gap-4">
