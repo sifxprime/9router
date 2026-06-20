@@ -8,23 +8,13 @@ const path = require("path");
 
 const BETTER_SQLITE3_VERSION = "12.6.2";
 
-// Must match src/mitm/paths.js / src/lib/dataDir.js — one-time auto-migration
-// of ~/.9router → ~/.krouter. Idempotent.
-function appNameDir(name) {
-  return process.platform === "win32"
-    ? path.join(process.env.APPDATA || os.homedir(), name)
-    : path.join(os.homedir(), `.${name}`);
-}
+// Kept in sync with src/mitm/paths.js / src/lib/dataDir.js
 function getDataDir() {
   if (process.env.DATA_DIR) return process.env.DATA_DIR;
-  const target = appNameDir("krouter");
-  const legacy = appNameDir("9router");
-  try {
-    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
-      fs.renameSync(legacy, target);
-    }
-  } catch { /* best effort */ }
-  return target;
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || os.homedir(), "krouter");
+  }
+  return path.join(os.homedir(), ".krouter");
 }
 
 function getRuntimeDir() {
