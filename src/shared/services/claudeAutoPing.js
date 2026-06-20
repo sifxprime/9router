@@ -51,6 +51,8 @@ async function sendPing(accessToken, proxyOptions) {
       ...CLAUDE_CLI_SPOOF_HEADERS,
       "Authorization": `Bearer ${accessToken}`,
       "content-type": "application/json",
+      // MITM anti-loop — see comment in open-sse/executors/base.js
+      "x-request-source": "local",
     },
     body: JSON.stringify({
       model: C.pingModel,

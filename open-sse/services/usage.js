@@ -546,6 +546,7 @@ export async function getClaudeUsage(accessToken, proxyOptions = null) {
         "Authorization": `Bearer ${accessToken}`,
         "anthropic-beta": "oauth-2025-04-20",
         "anthropic-version": CLAUDE_CONFIG.apiVersion,
+        "x-request-source": "local", // MITM anti-loop
       },
     }, proxyOptions);
 
@@ -637,6 +638,7 @@ async function getClaudeUsageLegacy(accessToken, proxyOptions = null, oauthStatu
       headers: {
         "Authorization": `Bearer ${accessToken}`,
         "anthropic-version": CLAUDE_CONFIG.apiVersion,
+        "x-request-source": "local", // MITM anti-loop
       },
     }, proxyOptions);
 
@@ -651,6 +653,7 @@ async function getClaudeUsageLegacy(accessToken, proxyOptions = null, oauthStatu
             headers: {
               "Authorization": `Bearer ${accessToken}`,
               "anthropic-version": CLAUDE_CONFIG.apiVersion,
+              "x-request-source": "local", // MITM anti-loop
             },
           },
           proxyOptions

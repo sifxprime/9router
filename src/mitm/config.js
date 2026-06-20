@@ -21,6 +21,7 @@ const TARGET_HOSTS = [
   "codewhisperer.us-east-1.amazonaws.com",
   "runtime.us-east-1.kiro.dev",
   "api2.cursor.sh",
+  "api.anthropic.com",
 ];
 
 const URL_PATTERNS = {
@@ -28,6 +29,11 @@ const URL_PATTERNS = {
   copilot: ["/chat/completions", "/v1/messages", "/responses"],
   kiro: ["/generateAssistantResponse"],
   cursor: ["/BidiAppend", "/RunSSE", "/RunPoll", "/Run"],
+  // /v1/messages is the chat endpoint; /v1/messages/count_tokens is the
+  // pre-request token preview Claude Desktop fires before each send.
+  // Anything else on api.anthropic.com (OAuth, settings, usage) falls through
+  // to passthrough — those still need to reach real Anthropic.
+  claude: ["/v1/messages"],
 };
 
 // Synonym map: rawModel from request → canonical alias key in mitmAlias DB
@@ -83,6 +89,7 @@ function getToolForHost(host) {
   if (h === "daily-cloudcode-pa.googleapis.com" || h === "cloudcode-pa.googleapis.com") return "antigravity";
   if (h === "q.us-east-1.amazonaws.com" || h === "codewhisperer.us-east-1.amazonaws.com" || h === "runtime.us-east-1.kiro.dev") return "kiro";
   if (h === "api2.cursor.sh") return "cursor";
+  if (h === "api.anthropic.com") return "claude";
   return null;
 }
 

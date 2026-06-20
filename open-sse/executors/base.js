@@ -44,6 +44,12 @@ export class BaseExecutor {
   buildHeaders(credentials, stream = true) {
     const headers = {
       "Content-Type": "application/json",
+      // Anti-loop marker for the MITM proxy. Any outbound call to a hostname
+      // we intercept (currently antigravity / kiro / copilot / cursor, soon
+      // claude) must include this header so the MITM server passes through to
+      // the real upstream instead of forwarding back into our own /v1/messages
+      // → infinite recursion. The MITM checks for it at src/mitm/server.js.
+      "x-request-source": "local",
       ...this.config.headers
     };
 

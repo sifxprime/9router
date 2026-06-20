@@ -64,6 +64,22 @@ export const MITM_TOOLS = {
       { id: "simple-task", name: "Qwen3 Coder Next", alias: "simple-task" },
     ],
   },
+  claude: {
+    id: "claude",
+    name: "Claude Desktop",
+    image: "/providers/claude.png",
+    color: "#D97757",
+    description: "Anthropic Claude Desktop app (Electron). Intercepts api.anthropic.com so the desktop app routes through kRouter to whichever provider you've mapped (your Claude OAuth, Antigravity, etc.). The Claude Code CLI does NOT need this — use ANTHROPIC_BASE_URL instead.",
+    configType: "mitm",
+    mitmDomain: "api.anthropic.com",
+    defaultModels: [
+      { id: "claude-opus-4-7", name: "Claude Opus 4.7", alias: "claude-opus-4-7" },
+      { id: "claude-opus-4-6", name: "Claude Opus 4.6", alias: "claude-opus-4-6" },
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "claude-sonnet-4-6" },
+      { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4-5" },
+      { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", alias: "claude-haiku-4-5" },
+    ],
+  },
   // cursor: {
   //   id: "cursor",
   //   name: "Cursor",
