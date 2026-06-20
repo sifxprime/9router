@@ -28,7 +28,7 @@ const STRIP_RULES = [
   // Haiku 4.5, Claude Opus 4.7, etc.) rejects it. Strip both keys for Claude
   // models that aren't the two opus/sonnet 4.6 exceptions. Ref: upstream #713.
   //
-  // Note: 9router's model registry uses BOTH dot ("claude-opus-4.6") and
+  // Note: kRouter's model registry uses BOTH dot ("claude-opus-4.6") and
   // hyphen ("claude-opus-4-6", "claude-opus-4-6-thinking") forms — upstream's
   // literal-dot regex only matched the first, so on our codebase the 4.6
   // exception failed to fire and stripped thinking from valid 4.6 requests.

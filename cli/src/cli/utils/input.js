@@ -32,6 +32,21 @@ function primeRawOnce() {
   } catch {}
 }
 
+// Drain any bytes the OS / terminal buffered in stdin BEFORE raw mode + the
+// keypress listener went live. The CLI shows its first menu about 2 seconds
+// after `krouter` launches (server warm-up + setTimeout). Impatient users
+// type arrow keys during that window, the bytes sit in the cooked-mode
+// buffer, then arrive as a flood of half-parsed escape sequences the
+// moment raw mode engages — which is why "move down" sometimes does
+// nothing or jumps two slots. Read-and-discard everything pending so only
+// keys pressed AFTER the menu is on screen drive selection.
+function drainStdin() {
+  if (!process.stdin.isTTY) return;
+  // Toggle raw mode on so .read() returns the buffered raw bytes (not lines).
+  try { process.stdin.setRawMode(true); } catch {}
+  while (process.stdin.read() !== null) { /* discard */ }
+}
+
 function suspendRawFor(fn) {
   // Temporarily drop raw mode so readline.question can buffer line input.
   const wasPrimed = rawPrimed;
@@ -96,6 +111,10 @@ async function selectMenu(title, items, defaultIndex = 0, subtitle = "", headerC
 
     primeRawOnce();
     if (!process.stdin.isTTY) { resolve(-1); return; }
+    // Discard any keys typed while the user was waiting for the menu to
+    // appear — eliminates the "down arrow does nothing or jumps two slots"
+    // flake on the first paint.
+    drainStdin();
 
     const renderMenu = () => {
       if (!isActive) return;

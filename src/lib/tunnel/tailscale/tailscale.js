@@ -202,7 +202,7 @@ export async function isTailscaleRunningStrict() {
   }
 }
 
-// Check if a system-level tailscaled is running (uses system socket, not 9Router's custom one).
+// Check if a system-level tailscaled is running (uses system socket, not kRouter's custom one).
 export function isSystemDaemonRunning() {
   if (IS_WINDOWS || !SYSTEM_TAILSCALE_SOCKET || !fs.existsSync(SYSTEM_TAILSCALE_SOCKET)) return false;
   const bin = getTailscaleBin();

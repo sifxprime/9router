@@ -1,3 +1,82 @@
+# v0.5.11 (2026-06-20) — CLI menu reliability + final 9router scrub
+
+Two real bug fixes + the last batch of standalone cleanups.
+
+## Bug fixes
+
+### CLI terminal-UI was reading the wrong field name
+The 0.5.10 standalone cleanup renamed the API response field
+`has9Router` → `hasKRouter` everywhere — but only on the WEB dashboard
+side. `cli/src/cli/menus/cliTools.js` (the in-terminal `krouter` menu
+that lets you configure Claude / Codex / OpenCode / etc. from the
+prompt) still read `has9Router`, got undefined, and silently treated
+every installed IDE as "not configured." Tooling-status checks in the
+TUI were effectively broken since 0.5.10. Fixed.
+
+### Arrow-key "move down sometimes doesn't work" on first menu
+When you run `krouter`, the interface menu appears after ~2 seconds
+(server warm-up). Impatient users press arrow keys during that wait.
+The bytes sit in stdin's cooked-mode buffer. When raw mode engages and
+the keypress listener attaches, those buffered bytes arrive as a flood
+of half-parsed escape sequences — `\x1b[B` (down arrow) sometimes gets
+fragmented across reads, so the first one or two presses register as
+garbage instead of a `down` event. Now `selectMenu` calls `drainStdin()`
+right after `primeRawOnce()`, discarding any pre-menu buffered bytes so
+only keys pressed AFTER the menu is on screen drive selection. The
+flake disappears.
+
+## Standalone scrub (the rest)
+
+### Stale 9router refs cleaned out of code paths still hit at runtime
+  - `cli/src/cli/api/client.js` — last copy of the `~/.9router` →
+    `~/.krouter` data-dir migration block. Removed.
+  - `cli/src/cli/menus/cliTools.js` — `OR custom:9Router-0` model-id
+    fallback + `?? providers["9router"]` dual-read + `(?:krouter|9router)`
+    model-prefix regex. All tightened to `krouter` only.
+  - `src/lib/mcp/stdioSseBridge.js` — global state key
+    `__9routerMcpBridges` → `__krouterMcpBridges`; user-visible
+    "truncated by 9router bridge" message → "by kRouter bridge"
+  - `cli/scripts/build-cli.js` — build-script title + a stale comment
+  - `cli/hooks/sqliteRuntime.js` — already cleaned in 0.5.10, verified
+
+### package-lock.json regenerated
+The `cli/package-lock.json` still listed `9router` as a bin entry from
+when the package.json bin section was changed in 0.5.10. Regenerated.
+
+### Comment cleanup (non-runtime)
+About a dozen JSDoc + inline comments updated from "9router" to
+"kRouter" across kiroConstants, kiroModels, sessionManager,
+commandcode, openai-to-kiro, paramSupport, kiro MITM handler,
+tailscale, copilot MITM. Zero behavioral impact.
+
+## Intentional keeps (still grep "9router" if you look)
+
+  - `Footer.js` + `README.md` upstream attribution (MIT license)
+  - `MITM cert CN "9Router MITM Root CA"` (changing breaks existing
+    user trust stores)
+  - `ENCRYPT_SALT "9router-mitm-pwd"` (changing bricks saved sudo
+    passwords)
+  - `X-CLIENT-TYPE: 9router` / `grok-cli/9router` / `X-Msh-Platform:
+    9router` HTTP headers (3rd-party APIs whitelist by name)
+  - `claudeAutoPing.js` + `capabilities.js` port-source comments
+    (factual provenance notes)
+  - Linux trust-store: uninstall path still removes BOTH
+    `9router-root-ca.crt` AND `krouter-root-ca.crt` so a
+    pre-rebrand user's keychain stays clean
+
+## Verified
+  - 605 pass + 20 expected-fail + 27 fail (identical baseline, zero regressions)
+  - node --check on every modified file passes
+  - cli/package-lock.json bin section now `{"krouter": "cli.js"}` only
+
+## Upgrade path for users on < 0.5.11
+
+If `krouter` works but `9router` ALSO works (leftover shim):
+```
+npm uninstall -g @sifxprime/krouter
+npm install -g @sifxprime/krouter@latest
+```
+
 # v0.5.10 (2026-06-20) — standalone: drop 9router legacy plumbing
 
 Cleanup release. The fork has been on its own brand long enough that the

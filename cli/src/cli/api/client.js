@@ -15,28 +15,13 @@ const DEFAULT_CONFIG = {
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
-// Must match src/mitm/paths.js / src/lib/dataDir.js — one-time auto-migration
-// of ~/.9router → ~/.krouter. Idempotent.
-const APP_NAME = "krouter";
-const LEGACY_APP_NAME = "9router";
-
-function appNameDir(name) {
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), name);
-  }
-  return path.join(os.homedir(), `.${name}`);
-}
-
+// Kept in sync with src/mitm/paths.js / src/lib/dataDir.js
 function getDataDir() {
   if (process.env.DATA_DIR) return process.env.DATA_DIR;
-  const target = appNameDir(APP_NAME);
-  const legacy = appNameDir(LEGACY_APP_NAME);
-  try {
-    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
-      fs.renameSync(legacy, target);
-    }
-  } catch { /* best effort */ }
-  return target;
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "krouter");
+  }
+  return path.join(os.homedir(), ".krouter");
 }
 
 const MACHINE_ID_FILE = path.join(getDataDir(), "machine-id");
@@ -378,7 +363,7 @@ async function deleteCombo(id) {
 /**
  * Get CLI tool settings
  * @param {string} tool - Tool name: claude | codex | droid | openclaw
- * @returns {Promise<Object>} { success, data: { installed, has9Router, ... } }
+ * @returns {Promise<Object>} { success, data: { installed, hasKRouter, ... } }
  */
 async function getCliToolSettings(tool) {
   return makeRequest("GET", `/api/cli-tools/${tool}-settings`);

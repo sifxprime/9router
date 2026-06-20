@@ -82,7 +82,7 @@ function copyRecursive(src, dest) {
   }
 }
 
-console.log("📦 Building 9Router CLI package with Next.js...\n");
+console.log("📦 Building kRouter CLI package with Next.js...\n");
 
 fs.mkdirSync(buildHomeDir, { recursive: true });
 fs.mkdirSync(path.join(buildHomeDir, "AppData", "Roaming"), { recursive: true });
@@ -140,7 +140,7 @@ console.log("✅ Cleaned\n");
 //                                        — workspace tracing
 //                                          (NEXT_TRACING_ROOT_MODE=workspace);
 //                                          subdir name = local checkout folder
-//                                          (e.g. "9router-master", "krouter",
+//                                          (e.g. "krouter",
 //                                          whatever the user cloned into).
 // Auto-detect: prefer a/b explicit paths; otherwise scan one level deep for
 // the first child directory containing server.js. This makes the build work
@@ -189,7 +189,7 @@ if (fs.existsSync(customServerSrc)) {
 }
 
 // Step 3b: Ensure sql.js (pure JS fallback) bundled in app/cli/app/node_modules.
-// Strip better-sqlite3 (native) — it lives in ~/.9router/runtime to avoid
+// Strip better-sqlite3 (native) — it lives in ~/.krouter/runtime to avoid
 // Windows EBUSY during global CLI updates. node:sqlite (Node ≥22.5) is also
 // available as a no-install middle tier.
 console.log("3️⃣ b Configuring SQLite drivers...");

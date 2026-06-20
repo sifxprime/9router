@@ -236,7 +236,7 @@ async function installCertLinux(sudoPassword, certPath) {
   const destFile = `${config.dir}/krouter-root-ca.crt`;
 
   // Copy to the discovered directory and execute the specific update command.
-  // Also best-effort remove the legacy 9router-named (pre-rebrand) file so the trust store stays clean.
+  // Also best-effort remove the legacy pre-rebrand cert file so the trust store stays clean.
   const legacyFile = `${config.dir}/9router-root-ca.crt`;
   const cmd = `rm -f "${legacyFile}"; cp "${certPath}" "${destFile}" && (${config.cmd} 2>/dev/null || true)`;
   
