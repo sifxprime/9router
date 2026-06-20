@@ -1,9 +1,21 @@
 /**
  * Shared combo (model combo) handling with fallback + fusion support
+ *
+ * 0.5.15: Added capacity auto-switch — reorder a combo's model list at
+ * request time so models that can read the request's input modalities
+ * (vision / pdf) try first. Stable: combo order is preserved among
+ * equally-capable models.
  */
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
+import { getCapabilitiesForModel } from "../providers/capabilities.js";
+
+// Hard capabilities = input modalities. Missing one drops request data
+// silently (e.g. image stripped before reaching the model). MUST be
+// prioritized — sending an image to a text-only model = degraded answer
+// with no error. Soft caps (search, tools) only degrade a feature.
+const HARD_CAPS = new Set(["vision", "pdf", "audioInput", "videoInput"]);
 
 // Inline replacement for upstream's open-sse/translator/formats/gemini.js
 // (Wave-2 file we don't have). Extracts text from message content shapes:
@@ -122,9 +134,103 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1 }) {
+/**
+ * Walk just the trailing run of user messages — vision/pdf requirements are
+ * decided by what the user just sent, not the whole conversation history.
+ * Stops at the first non-user message reading from the end.
+ */
+function trailingUserItems(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const m = arr[i];
+    if (!m) continue;
+    if (m.role === "user") out.unshift(m);
+    else break;
+  }
+  return out;
+}
+
+/**
+ * Detect which capabilities a request needs. Modalities (vision/pdf) are
+ * scanned only on the current user turn across the three known body shapes
+ * (OpenAI messages / Responses input / Gemini contents).
+ * Returns a Set of: "vision" | "pdf".
+ */
+export function detectRequiredCapabilities(body) {
+  const required = new Set();
+  if (!body || typeof body !== "object") return required;
+
+  const scanBlock = (b) => {
+    if (!b || typeof b !== "object") return;
+    const t = b.type;
+    if (t === "image_url" || t === "image" || t === "input_image") required.add("vision");
+    if (t === "file" || t === "document" || t === "input_file") required.add("pdf");
+    // Gemini parts: inlineData/fileData carry a mime
+    const mime = b.inlineData?.mimeType || b.fileData?.mimeType;
+    if (typeof mime === "string" && mime.startsWith("image/")) required.add("vision");
+    if (mime === "application/pdf") required.add("pdf");
+  };
+
+  const scanContent = (content) => {
+    if (Array.isArray(content)) for (const b of content) scanBlock(b);
+  };
+
+  for (const m of trailingUserItems(body.messages)) scanContent(m.content);   // openai / claude
+  for (const it of trailingUserItems(body.input)) scanContent(it.content);    // openai responses
+  const contents = body.contents || body.request?.contents;                   // gemini / antigravity
+  for (const c of trailingUserItems(contents)) scanContent(c.parts);
+
+  return required;
+}
+
+/**
+ * Stable reorder so models that support the requested HARD capabilities
+ * (modalities the user actually sent) try first. Models that support all
+ * required hard caps go to tier 0; the rest go to tier 1. Original combo
+ * order is preserved within each tier.
+ *
+ * Effect: if you ask for an image and your combo is [text-only, vision-model],
+ * the request now hits the vision model first instead of silently dropping
+ * the image at the text-only model.
+ */
+export function reorderByCapabilities(models, required) {
+  if (!required || required.size === 0 || !Array.isArray(models) || models.length <= 1) return models;
+  const hard = [...required].filter((c) => HARD_CAPS.has(c));
+  if (hard.length === 0) return models;
+
+  const tierOf = (m) => {
+    const slash = typeof m === "string" ? m.indexOf("/") : -1;
+    const provider = slash > 0 ? m.slice(0, slash) : "";
+    const model = slash > 0 ? m.slice(slash + 1) : m;
+    const caps = getCapabilitiesForModel(provider, model);
+    return hard.every((c) => caps[c] === true) ? 0 : 1;
+  };
+
+  // Stable sort by tier (Array.prototype.sort is stable in modern V8).
+  return models
+    .map((m, i) => ({ m, i, t: tierOf(m) }))
+    .sort((a, b) => a.t - b.t || a.i - b.i)
+    .map((x) => x.m);
+}
+
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true }) {
   // Apply rotation strategy if enabled
-  const rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
+  let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
+
+  // Capacity auto-switch: float models that satisfy required input modalities
+  // (vision/pdf) to the front so an image request doesn't get silently
+  // stripped at a text-only model.
+  if (autoSwitch) {
+    const required = detectRequiredCapabilities(body);
+    if (required.size > 0) {
+      const reordered = reorderByCapabilities(rotatedModels, required);
+      if (reordered[0] !== rotatedModels[0]) {
+        log?.info?.("COMBO", `Capacity auto-switch: ${[...required].join(",")} → reordered to ${reordered[0]} first`);
+      }
+      rotatedModels = reordered;
+    }
+  }
   
   let lastError = null;
   let earliestRetryAfter = null;

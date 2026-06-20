@@ -356,10 +356,31 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
     try {
       modelsBase = modelsBase.replace(/\/$/, "");
       if (modelsBase.endsWith("/messages")) modelsBase = modelsBase.slice(0, -9);
-      const res = await fetchWithConnectionProxy(`${modelsBase}/models`, {
-        headers: { "x-api-key": connection.apiKey, "anthropic-version": "2023-06-01", "Authorization": `Bearer ${connection.apiKey}` },
+      // Use POST /v1/messages with max_tokens:1 instead of GET /models.
+      // The Anthropic spec does not require providers to expose /models, so
+      // many anthropic-compatible gateways return 404 on it and we'd report
+      // a perfectly valid API key as "invalid". A 1-token POST validates the
+      // key against the real chat endpoint with negligible cost.
+      // 400 / 429 / 529 still confirm the key was accepted; only 401 / 403
+      // mean the key itself is rejected. (Port of upstream 0.5.6 fix.)
+      const messagesUrl = `${modelsBase}/v1/messages`;
+      const model = connection.defaultModel || "claude-3-haiku-20240307";
+      const res = await fetchWithConnectionProxy(messagesUrl, {
+        method: "POST",
+        headers: {
+          "x-api-key": connection.apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "Authorization": `Bearer ${connection.apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1,
+          messages: [{ role: "user", content: "test" }],
+        }),
       }, effectiveProxy);
-      return { valid: res.ok, error: res.ok ? null : "Invalid API key or base URL" };
+      const valid = res.status !== 401 && res.status !== 403;
+      return { valid, error: valid ? null : "Invalid API key or base URL" };
     } catch (err) {
       return { valid: false, error: err.message };
     }
