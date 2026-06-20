@@ -253,6 +253,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       rtkEnabled: !!settings.rtkEnabled,
       cavemanEnabled: !!settings.cavemanEnabled,
       cavemanLevel: settings.cavemanLevel || "full",
+      ponytailEnabled: !!settings.ponytailEnabled,
+      ponytailLevel: settings.ponytailLevel || "full",
       providerThinking,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,

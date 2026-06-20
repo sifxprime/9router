@@ -36,3 +36,12 @@ export function isValidModel(aliasOrId, modelId) {
 export const AI_MODELS = Object.entries(MODELS).flatMap(([alias, models]) =>
   models.map(m => ({ provider: alias, model: m.id, name: m.name }))
 );
+
+// Capacity metadata for UI badges — icon + label + color per capability.
+// Used by CapacityBadges to render small inline icons next to a model id
+// so users can see at a glance which models support image input, PDFs, etc.
+export const CAPACITY_META = {
+  vision: { icon: "visibility", label: "Vision", desc: "Supports image input", color: "text-blue-500" },
+  pdf: { icon: "picture_as_pdf", label: "PDF", desc: "Supports PDF document input", color: "text-rose-500" },
+  reasoning: { icon: "neurology", label: "Reasoning", desc: "Supports reasoning / thinking", color: "text-amber-500" },
+};
