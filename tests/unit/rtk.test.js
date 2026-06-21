@@ -13,6 +13,9 @@ import { searchList } from "../../open-sse/rtk/filters/searchList.js";
 import { autoDetectFilter } from "../../open-sse/rtk/autodetect.js";
 import { safeApply } from "../../open-sse/rtk/applyFilter.js";
 
+import { fileRead } from "../../open-sse/rtk/filters/fileRead.js";
+import { curlVerbose } from "../../open-sse/rtk/filters/curlVerbose.js";
+
 function makeLongDiff() {
   const lines = ["diff --git a/foo.js b/foo.js", "index abc..def 100644", "--- a/foo.js", "+++ b/foo.js", "@@ -1,3 +1,200 @@"];
   for (let i = 0; i < 200; i++) lines.push(`+added line ${i} ${"x".repeat(20)}`);
@@ -51,6 +54,37 @@ function makeFindOutput() {
   for (let i = 0; i < 20; i++) lines.push(`./src/b/${i}.js`);
   for (let i = 0; i < 5; i++) lines.push(`./top${i}.md`);
   return lines.join("\n");
+}
+
+function makeLongFile() {
+  const lines = [];
+  for (let i = 1; i <= 1000; i++) {
+    if (i <= 50) lines.push(`import { something } from "mod${i}";`);
+    else if (i >= 950) lines.push(`export const x${i} = ${i};`);
+    else lines.push(`// internal detail ${i}`);
+  }
+  return lines.join("\n");
+}
+
+function makeCurlOutput() {
+  return `*   Trying 127.0.0.1:8000...
+* Connected to localhost (127.0.0.1) port 8000
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* SSL connection using TLSv1.3 / AEAD-CHACHA20-POLY1305-SHA256
+> GET /api/v1/users HTTP/1.1
+> Host: localhost:8000
+> User-Agent: curl/8.4.0
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< Date: Sun, 21 Jun 2026 12:00:00 GMT
+< Content-Type: application/json
+< Content-Length: 15
+<
+{"ok": true}
+* Connection #0 to host localhost left intact`;
 }
 
 describe("RTK enabled flag", () => {
@@ -218,7 +252,7 @@ describe("RTK filters (extras)", () => {
 
 describe("autoDetectFilter (extras)", () => {
   it("detects tree via box-drawing glyphs", () => {
-    expect(autoDetectFilter(".\n├── src\n│   └── main.rs\n└── Cargo.toml\n").filterName).toBe("tree");
+    expect(autoDetectFilter(".\n├── src\n│   └── main.rs\n└── Cargo.toml\n").name).toBe("tree");
   });
   it("detects ls via total + perms rows", () => {
     const input = [
@@ -227,11 +261,24 @@ describe("autoDetectFilter (extras)", () => {
       "-rw-r--r--  1 user staff 1234 Jan  1 12:00 main.js",
       "-rw-r--r--  1 user staff 5678 Jan  1 12:00 README.md"
     ].join("\n");
-    expect(autoDetectFilter(input).filterName).toBe("ls");
+    expect(autoDetectFilter(input).name).toBe("ls");
   });
   it("detects Cursor search list", () => {
     const input = "Result of search in '/x' (total 3 files):\n- a/b.js\n- a/c.js\n- a/d.js";
-    expect(autoDetectFilter(input).filterName).toBe("search-list");
+    expect(autoDetectFilter(input).name).toBe("searchList");
+  });
+
+  it("detects curl output", () => {
+    expect(autoDetectFilter(makeCurlOutput()).name).toBe("curlVerbose");
+  });
+
+  it("detects large file reads as fileRead (fallback when not dedupLog)", () => {
+    // 1000 lines of unique code with no duplicates -> dedupLog fails to reduce it,
+    // so fallback should pick fileRead due to length > 500
+    const out = autoDetectFilter(makeLongFile());
+    // Auto-detect currently hits dedupLog first and returns it if lines >= 5
+    // But since the new fileRead block checks lines.length > 500, it intercepts
+    expect(out.name).toBe("fileRead");
   });
 });
 
@@ -240,6 +287,26 @@ describe("safeApply", () => {
     const out = safeApply(() => { throw new Error("boom"); }, "hello");
     expect(out).toBe("hello");
   });
+  it("fileRead preserves head and tail but elides middle of massive files", () => {
+    const input = makeLongFile();
+    const out = fileRead(input);
+    expect(out).toContain("import { something } from \"mod1\"");
+    expect(out).toContain("export const x1000 = 1000");
+    expect(out).toContain("lines truncated by kRouter RTK fileRead filter");
+    expect(out.length).toBeLessThan(input.length);
+  });
+
+  it("curlVerbose strips TLS/TCP noise but keeps headers and body", () => {
+    const input = makeCurlOutput();
+    const out = curlVerbose(input);
+    expect(out).not.toContain("*   Trying");
+    expect(out).not.toContain("* TLSv1.3");
+    expect(out).toContain("> GET /api/v1/users");
+    expect(out).toContain("< HTTP/1.1 200 OK");
+    expect(out).toContain('{"ok": true}');
+    expect(out.length).toBeLessThan(input.length);
+  });
+
   it("returns input if filter returns non-string", () => {
     const out = safeApply(() => 42, "hello");
     expect(out).toBe("hello");

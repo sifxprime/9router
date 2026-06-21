@@ -1,6 +1,7 @@
 import { HTTP_STATUS, RETRY_CONFIG, DEFAULT_RETRY_CONFIG, resolveRetryEntry, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { parseRetryAfterHeaders } from "../utils/retryHeaders.js";
 import { dbg } from "../utils/debugLog.js";
 
 /**
@@ -115,21 +116,47 @@ export class BaseExecutor {
       const { attempts, delayMs } = resolveRetryEntry(retryConfig[statusKey]);
       if (attempts <= 0 || retryAttemptsByUrl[urlIndex] >= attempts) return false;
 
-      // Fast-fail on 429 quota exhaustion: if the reset is more than 60s away,
-      // a 2-8s exponential backoff retry is pointless. Parse the error early
-      // and skip retries if the provider tells us it's a long lockout.
-      if (response && response.status === HTTP_STATUS.RATE_LIMITED && typeof this.parseError === "function") {
-        try {
-          const bodyText = await response.clone().text();
-          const parsed = this.parseError(response, bodyText);
-          if (parsed?.resetsAtMs) {
-            const timeToResetMs = parsed.resetsAtMs - Date.now();
-            if (timeToResetMs > 60000) {
-              log?.debug?.("RETRY", `${reason}, Retry-After too long (${Math.ceil(timeToResetMs / 1000)}s), skipping retry`);
-              return false;
-            }
-          }
-        } catch { /* ignore parse error, proceed to retry */ }
+      // Smart retry-after parsing: read provider-set timing headers FIRST,
+      // then fall back to executor-specific parseError, then to generic
+      // exponential backoff. Works for any 4xx/5xx — most providers (OpenAI,
+      // Anthropic, Groq, xAI, Fireworks, NVIDIA, Together) set Retry-After
+      // and/or x-ratelimit-reset-* on rate-limited responses, but kRouter
+      // previously honored them only via per-executor parseError (3 of ~20
+      // executors). Honoring the headers everywhere stops the
+      // "provider says wait 120s, kRouter retries every 2s and burns 429s" loop.
+      let preciseResetMs = null;
+      if (response) {
+        const { resetsAtMs: headerReset, source } = parseRetryAfterHeaders(response);
+        if (headerReset) {
+          preciseResetMs = headerReset;
+          if (source) log?.debug?.("RETRY", `${reason}, ${source} → reset in ${Math.ceil((headerReset - Date.now()) / 1000)}s`);
+        }
+        // Fall back to executor-specific parser (codex usage_limit_reached,
+        // gemini-cli retryDelay, kiro extracted resets) — still useful when the
+        // provider buries the timing in the JSON body instead of a header.
+        if (!preciseResetMs && response.status === HTTP_STATUS.RATE_LIMITED && typeof this.parseError === "function") {
+          try {
+            const bodyText = await response.clone().text();
+            const parsed = this.parseError(response, bodyText);
+            if (parsed?.resetsAtMs) preciseResetMs = parsed.resetsAtMs;
+          } catch { /* ignore — proceed to retry */ }
+        }
+      }
+
+      if (preciseResetMs) {
+        const timeToResetMs = preciseResetMs - Date.now();
+        // Long lockout → skip retry on this account; caller handles cross-account fallback.
+        if (timeToResetMs > 60000) {
+          log?.debug?.("RETRY", `${reason}, reset too far (${Math.ceil(timeToResetMs / 1000)}s), skipping`);
+          return false;
+        }
+        // Short reset — honor it instead of generic backoff (with a tiny floor
+        // to avoid hammering the provider one millisecond after reset).
+        const honored = Math.max(timeToResetMs + 100, 250);
+        retryAttemptsByUrl[urlIndex]++;
+        log?.debug?.("RETRY", `${reason} retry ${retryAttemptsByUrl[urlIndex]}/${attempts} after ${(honored / 1000).toFixed(1)}s (provider-set)`);
+        await new Promise(resolve => setTimeout(resolve, honored));
+        return true;
       }
 
       retryAttemptsByUrl[urlIndex]++;

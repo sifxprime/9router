@@ -63,13 +63,27 @@ export async function parseUpstreamError(response, executor = null) {
     bodyText = "";
   }
 
+  // Smart 429 retry-after — read provider-set headers (Retry-After,
+  // x-ratelimit-reset-*, anthropic-ratelimit-*) before falling back to
+  // executor-specific parsers. This ensures cross-account fallback also
+  // honors the precise reset time when marking the failing account as
+  // rate-limited.
+  let headerResetsAtMs = null;
+  try {
+    const { parseRetryAfterHeaders } = await import("./retryHeaders.js");
+    const { resetsAtMs } = parseRetryAfterHeaders(response);
+    if (resetsAtMs) headerResetsAtMs = resetsAtMs;
+  } catch { /* ignore — fall through */ }
+
   // Let executor-specific parser extract provider-specific fields (e.g. codex resetsAtMs)
   if (executor && typeof executor.parseError === "function") {
     try {
       const parsed = executor.parseError(response, bodyText);
       if (parsed && typeof parsed === "object") {
         const msg = parsed.message || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
-        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs };
+        // Prefer body-derived resetsAtMs (more precise for codex/gemini-cli),
+        // fall back to header-derived for everything else.
+        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs || headerResetsAtMs };
       }
     } catch { /* fall through to default parsing */ }
   }
@@ -85,7 +99,7 @@ export async function parseUpstreamError(response, executor = null) {
   const messageStr = typeof message === "string" ? message : JSON.stringify(message);
   const finalMessage = messageStr || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
 
-  return { statusCode: response.status, message: finalMessage };
+  return { statusCode: response.status, message: finalMessage, resetsAtMs: headerResetsAtMs || undefined };
 }
 
 /**

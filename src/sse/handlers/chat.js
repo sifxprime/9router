@@ -14,6 +14,7 @@ import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { handleComboChat, handleFusionChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
+import { lookupCache, saveToCache } from "open-sse/services/responseCache.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { recordOutcome } from "@/shared/services/connectionHealth";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
@@ -95,6 +96,24 @@ export async function handleChat(request, clientRawRequest = null) {
   const userAgent = request?.headers?.get("user-agent") || "";
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming);
   if (bypassResponse) return bypassResponse.response || bypassResponse;
+
+  // Response cache: serve repeated identical non-streaming requests from memory
+  // (warmup probes, title generation, structured-output retries). Cache is keyed
+  // by exact request shape and gated on temperature ≤ 0.3 + stream=false.
+  if (settings.responseCacheEnabled) {
+    const cached = lookupCache({ model: modelStr, body });
+    if (cached) {
+      log.info("CHAT", `[CACHE HIT] ${modelStr} (${cached.bodyBytes}B saved)`);
+      return new Response(cached.body, {
+        status: cached.status,
+        headers: {
+          "Content-Type": cached.contentType,
+          "X-Cache": "HIT",
+          "X-Cache-Age-Ms": String(Date.now() - cached.storedAt),
+        },
+      });
+    }
+  }
 
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
@@ -275,7 +294,30 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     // wall-clock latency so consistently-fast accounts float to the top.
     recordOutcome(credentials.connectionId, !!result.success, Date.now() - requestStartedAtMs);
 
-    if (result.success) return result.response;
+    if (result.success) {
+      // Save to response cache (best-effort, async — non-blocking).
+      // Only fires when caching is enabled AND request body is cacheable
+      // (non-streaming + low temperature). Streaming responses are skipped
+      // entirely by lookup/save guards.
+      if (settings.responseCacheEnabled && body.stream !== true) {
+        try {
+          const cloned = result.response.clone();
+          const contentType = cloned.headers.get("content-type") || "application/json";
+          cloned.text().then((respText) => {
+            saveToCache({
+              model: modelStr,
+              body,
+              status: cloned.status,
+              contentType,
+              responseBody: respText,
+              estimatedTokens: Math.ceil(respText.length / 4),
+              ttlMs: (settings.responseCacheTtlSec || 300) * 1000,
+            });
+          }).catch(() => { /* ignore */ });
+        } catch { /* clone failed — skip cache, return response */ }
+      }
+      return result.response;
+    }
 
     // Mark account unavailable (auto-calculates cooldown with exponential backoff, or precise resetsAtMs)
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, result.resetsAtMs);

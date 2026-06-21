@@ -80,6 +80,8 @@ export default function APIPageClient({ machineId }) {
   const [hasPassword, setHasPassword] = useState(true);
   const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
   const [rtkEnabled, setRtkEnabledState] = useState(true);
+  const [responseCacheEnabled, setResponseCacheEnabled] = useState(false);
+  const [cacheStats, setCacheStats] = useState(null);
   const [cavemanEnabled, setCavemanEnabled] = useState(false);
   const [cavemanLevel, setCavemanLevel] = useState("full");
   const [ponytailEnabled, setPonytailEnabled] = useState(false);
@@ -281,6 +283,7 @@ export default function APIPageClient({ machineId }) {
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
         setRtkEnabledState(data.rtkEnabled !== false);
+        setResponseCacheEnabled(!!data.responseCacheEnabled);
         setCavemanEnabled(!!data.cavemanEnabled);
         setCavemanLevel(data.cavemanLevel || "full");
         setPonytailEnabled(!!data.ponytailEnabled);
@@ -344,6 +347,45 @@ export default function APIPageClient({ machineId }) {
       if (res.ok) setRtkEnabledState(value);
     } catch (error) {
       console.log("Error updating rtkEnabled:", error);
+    }
+  };
+
+  const handleResponseCacheEnabled = async (value) => {
+    setResponseCacheEnabled(value);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responseCacheEnabled: value }),
+      });
+    } catch (error) {
+      console.log("Error updating responseCacheEnabled:", error);
+    }
+  };
+
+  // Poll cache stats every 10s while the panel is enabled — surfaces live hit count
+  useEffect(() => {
+    if (!responseCacheEnabled) {
+      setCacheStats(null);
+      return;
+    }
+    const fetchStats = () => {
+      fetch("/api/cache", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (data) setCacheStats(data); })
+        .catch(() => {});
+    };
+    fetchStats();
+    const id = setInterval(fetchStats, 10000);
+    return () => clearInterval(id);
+  }, [responseCacheEnabled]);
+
+  const handleClearCache = async () => {
+    try {
+      await fetch("/api/cache", { method: "DELETE" });
+      setCacheStats({ entries: 0, hits: 0, misses: 0, hitRate: 0, bytesSaved: 0, tokensSaved: 0 });
+    } catch (error) {
+      console.log("Error clearing cache:", error);
     }
   };
 
@@ -1198,6 +1240,76 @@ export default function APIPageClient({ machineId }) {
             />
           </div>
         </div>
+      </Card>
+
+      {/* Response Cache — standalone card with live stats grid */}
+      <Card id="response-cache">
+        <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">memory</span>
+              Response Cache
+              <span className="text-xs font-normal text-text-muted">non-streaming only</span>
+            </h2>
+            <p className="text-sm text-text-muted mt-1">
+              Identical prompts (warmup, title-gen, JSON retries) served from memory.
+              5-min TTL · 500-entry LRU · gated on temperature ≤ 0.3.
+            </p>
+          </div>
+          <Toggle
+            checked={responseCacheEnabled}
+            onChange={() => handleResponseCacheEnabled(!responseCacheEnabled)}
+          />
+        </div>
+
+        {responseCacheEnabled && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-[10px] bg-surface-2 px-3 py-2.5">
+                <p className="text-xs text-text-muted">Hits</p>
+                <p className="text-lg font-semibold text-primary tabular-nums">
+                  {cacheStats?.hits ?? 0}
+                </p>
+              </div>
+              <div className="rounded-[10px] bg-surface-2 px-3 py-2.5">
+                <p className="text-xs text-text-muted">Misses</p>
+                <p className="text-lg font-semibold text-text-main tabular-nums">
+                  {cacheStats?.misses ?? 0}
+                </p>
+              </div>
+              <div className="rounded-[10px] bg-surface-2 px-3 py-2.5">
+                <p className="text-xs text-text-muted">Hit rate</p>
+                <p className="text-lg font-semibold text-text-main tabular-nums">
+                  {Math.round((cacheStats?.hitRate ?? 0) * 100)}%
+                </p>
+              </div>
+              <div className="rounded-[10px] bg-surface-2 px-3 py-2.5">
+                <p className="text-xs text-text-muted">Tokens saved</p>
+                <p className="text-lg font-semibold text-primary tabular-nums">
+                  {cacheStats?.tokensSaved ?? 0}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-xs text-text-muted">
+                {cacheStats?.entries ?? 0} entries cached
+                {cacheStats?.skipped > 0 && (
+                  <span className="ml-2 opacity-70">· {cacheStats.skipped} skipped (streaming or temp&gt;0.3)</span>
+                )}
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon="delete_sweep"
+                onClick={handleClearCache}
+                title="Clear all cached responses and reset stats"
+              >
+                Clear cache
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* API Keys */}

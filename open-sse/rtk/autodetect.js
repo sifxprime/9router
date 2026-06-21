@@ -13,6 +13,8 @@ import { tree } from "./filters/tree.js";
 import { smartTruncate } from "./filters/smartTruncate.js";
 import { readNumbered, READ_NUMBERED_LINE_RE } from "./filters/readNumbered.js";
 import { searchList, SEARCH_LIST_HEADER_RE } from "./filters/searchList.js";
+import { curlVerbose } from "./filters/curlVerbose.js";
+import { fileRead } from "./filters/fileRead.js";
 
 const RE_GIT_DIFF = /^diff --git /m;
 const RE_GIT_DIFF_HUNK = /^@@ /m;
@@ -22,10 +24,14 @@ const RE_BUILD_OUTPUT = /^(npm (warn|error|ERR!)|yarn (warn|error)|\s*Compiling\
 const RE_TREE_GLYPH = /[├└]──|│  /;
 const RE_LS_ROW = /^[-dlbcps][rwx-]{9}/m;
 const RE_LS_TOTAL = /^total \d+$/m;
+const RE_CURL_VERBOSE = /^\*   Trying \d+\.\d+\.\d+\.\d+:\d+\.\.\.|\* Connected to /m;
 
 export function autoDetectFilter(text) {
   // Rust: floor_char_boundary to avoid UTF-8 split — JS .slice() by char is safe
   const head = text.length > DETECT_WINDOW ? text.slice(0, DETECT_WINDOW) : text;
+
+  // curl -v output
+  if (RE_CURL_VERBOSE.test(head)) return curlVerbose;
 
   if (RE_GIT_DIFF.test(head) || RE_GIT_DIFF_HUNK.test(head)) return gitDiff;
   if (RE_GIT_STATUS.test(head)) return gitStatus;
@@ -59,11 +65,21 @@ export function autoDetectFilter(text) {
     return readNumbered;
   }
 
+  // If it's a huge file read (thousands of lines) and we didn't match anything
+  // structured, use fileRead to preserve head/tail instead of generic dedup/truncate.
+  // Do this BEFORE dedupLog so big source files aren't mistakenly mangled by dedup.
+  const totalLines = text.split("\n").length;
+  if (totalLines > 500) return fileRead;
+
   // Fallback: dedupLog for generic multi-line noise with duplicates
-  if (nonEmpty.length >= 5) return dedupLog;
+  if (nonEmpty.length >= 5) {
+    return dedupLog;
+  }
 
   // Last resort: big blob with no structure — smart truncate
-  if (text.split("\n").length >= SMART_TRUNCATE_MIN_LINES) return smartTruncate;
+  if (totalLines >= SMART_TRUNCATE_MIN_LINES) {
+    return smartTruncate;
+  }
 
   return null;
 }

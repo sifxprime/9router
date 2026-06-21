@@ -38,6 +38,8 @@ const DEFAULT_SETTINGS = {
   cavemanLevel: "full",
   ponytailEnabled: false,
   ponytailLevel: "full",
+  responseCacheEnabled: false,
+  responseCacheTtlSec: 300,
 };
 
 async function readRaw() {
