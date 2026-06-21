@@ -132,7 +132,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
 
   const res = await fetch(`${baseUrl}/api/v1/chat/completions`, {
     method: "POST",
-    headers,
+    headers: { ...headers, "x-bypass-modellock": "1" },
     body: JSON.stringify({
       model,
       max_tokens: 1,

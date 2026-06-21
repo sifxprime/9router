@@ -395,6 +395,55 @@ describe("compressMessages (enabled)", () => {
     expect(compressMessages({ messages: null }, true)).toBeNull();
   });
 
+  it("compresses Gemini functionResponse.result (bare contents)", () => {
+    const big = makeGitStatus().repeat(20); // > MIN_COMPRESS_SIZE
+    const body = {
+      contents: [
+        { role: "user", parts: [{ text: "do it" }] },
+        {
+          role: "user",
+          parts: [{ functionResponse: { name: "shell", response: { result: big } } }]
+        }
+      ]
+    };
+    const stats = compressMessages(body, true);
+    expect(stats.hits.length).toBeGreaterThan(0);
+    expect(body.contents[1].parts[0].functionResponse.response.result.length).toBeLessThan(big.length);
+  });
+
+  it("compresses Antigravity-wrapped Gemini (body.request.contents)", () => {
+    const big = makeGitStatus().repeat(20);
+    const body = {
+      project: "test", model: "gemini-pro-agent",
+      request: {
+        contents: [
+          {
+            role: "user",
+            parts: [{ functionResponse: { name: "fs", response: { output: big } } }]
+          }
+        ]
+      }
+    };
+    const stats = compressMessages(body, true);
+    expect(stats.hits.length).toBeGreaterThan(0);
+    expect(body.request.contents[0].parts[0].functionResponse.response.output.length).toBeLessThan(big.length);
+  });
+
+  it("compresses double-nested Gemini result (openai-to-gemini shape: response.result.result)", () => {
+    const big = makeGitStatus().repeat(20);
+    const body = {
+      contents: [
+        {
+          role: "user",
+          parts: [{ functionResponse: { name: "fs", response: { result: { result: big } } } }]
+        }
+      ]
+    };
+    const stats = compressMessages(body, true);
+    expect(stats.hits.length).toBeGreaterThan(0);
+    expect(body.contents[0].parts[0].functionResponse.response.result.result.length).toBeLessThan(big.length);
+  });
+
   it("handles mix of messages without crashing", () => {
     const body = {
       messages: [

@@ -273,7 +273,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Check if should fallback to next model
       const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
 
-      if (!shouldFallback) {
+      // Combo override: "model not found" 404 means THIS specific model is gone
+      // upstream — but the NEXT combo entry is a DIFFERENT model that might exist.
+      // Force-advance in that case so the combo keeps trying. Without this, my
+      // shouldFallback:false rule for NOT_FOUND would stop the entire combo on
+      // the first deleted model.
+      const isModelNotFound = result.status === 404 && /not[\s_]?found|requested entity/i.test(errorText || "");
+
+      if (!shouldFallback && !isModelNotFound) {
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
         return result;
       }

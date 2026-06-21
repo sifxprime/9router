@@ -32,6 +32,12 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
         return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
       }
+      // Deterministic error (e.g. model deleted upstream) — no point fanning out
+      // through other accounts. Signal the caller to stop iterating; cooldownMs
+      // still applies to this account so the picker won't keep selecting it.
+      if (rule.shouldFallback === false) {
+        return { shouldFallback: false, cooldownMs: rule.cooldownMs, accountLock: rule.accountLock || false };
+      }
       return { shouldFallback: true, cooldownMs: rule.cooldownMs, accountLock: rule.accountLock || false };
     }
 
@@ -40,6 +46,9 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
       if (rule.backoff) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
         return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
+      }
+      if (rule.shouldFallback === false) {
+        return { shouldFallback: false, cooldownMs: rule.cooldownMs, accountLock: rule.accountLock || false };
       }
       return { shouldFallback: true, cooldownMs: rule.cooldownMs, accountLock: rule.accountLock || false };
     }

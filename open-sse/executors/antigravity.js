@@ -110,6 +110,7 @@ export class AntigravityExecutor extends BaseExecutor {
     // format, which sits OUTSIDE body.request and would otherwise leak to Google.
     for (const key of ANTIGRAVITY_REQUEST_BLACKLIST) delete body[key];
 
+
     return {
       ...body,
       project: projectId,

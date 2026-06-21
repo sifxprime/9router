@@ -61,10 +61,12 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       return null;
     }
 
-    // Filter out model-locked and excluded connections
+    // Filter out model-locked and excluded connections.
+    // bypassModelLock=true is used by "Test Connection" flows — we want to actually
+    // call upstream to discover the current state of a model, not show cached locks.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
-      if (isModelLockActive(c, model)) return false;
+      if (!options.bypassModelLock && isModelLockActive(c, model)) return false;
       return true;
     });
 
@@ -247,7 +249,10 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       ({ shouldFallback, cooldownMs, newBackoffLevel, accountLock } = checkFallbackError(status, errorText, backoffLevel));
     }
 
-    if (!shouldFallback) {
+    // Even on shouldFallback:false, the rule may still set a cooldown so the same
+    // broken model isn't re-tried on the next request. Skip the DB write only when
+    // no cooldown was specified (legacy default for transient errors).
+    if (!shouldFallback && (!cooldownMs || cooldownMs <= 0)) {
       outcome = { shouldFallback: false, cooldownMs: 0 };
       return null; // no DB write
     }
@@ -260,7 +265,10 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       ? buildModelLockUpdate(null, cooldownMs)   // null → modelLock___all
       : buildModelLockUpdate(model, cooldownMs);
     lockKey = Object.keys(lockUpdate)[0];
-    outcome = { shouldFallback: true, cooldownMs, accountLock: accountLock || false };
+    // Preserve shouldFallback from the rule — deterministic upstream errors
+    // (e.g. model 404 NOT_FOUND) set shouldFallback:false so chat.js exits the
+    // fallback loop immediately instead of burning every other account.
+    outcome = { shouldFallback: shouldFallback === false ? false : true, cooldownMs, accountLock: accountLock || false };
 
     return {
       ...lockUpdate,

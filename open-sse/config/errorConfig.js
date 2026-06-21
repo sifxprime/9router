@@ -83,9 +83,23 @@ export const ERROR_RULES = [
   { text: "monthly_request_count",     cooldownMs: COOLDOWN.monthly, accountLock: true },
   { text: "reached the limit",         cooldownMs: COOLDOWN.monthly, accountLock: true },
   { text: "servicequotaexceeded",      cooldownMs: COOLDOWN.monthly, accountLock: true },
+  // Deterministic upstream "model deleted/renamed" errors. Google/Anthropic both
+  // return 404 NOT_FOUND when the model id no longer exists. Retrying through
+  // other accounts is guaranteed to fail the same way — burn no further accounts,
+  // surface the error directly to the user. Model-locked for 30min so any retry
+  // burst won't repeat the same dance.
+  { text: "requested entity was not found", shouldFallback: false, cooldownMs: 30 * 60 * 1000 },
+  { text: "404 page not found",             shouldFallback: false, cooldownMs: 30 * 60 * 1000 },
+  { text: "not_found",                      shouldFallback: false, cooldownMs: 30 * 60 * 1000 },
+  { text: "model_not_found",                shouldFallback: false, cooldownMs: 30 * 60 * 1000 },
+  { text: "the model `",                    shouldFallback: false, cooldownMs: 30 * 60 * 1000 }, // OpenAI shape: "The model `x` does not exist"
   { text: "rate limit",                backoff: true },
   { text: "too many requests",         backoff: true },
   { text: "quota exceeded",            backoff: true },
+  // 503 Capacity unavailable. If one account says Google is out of capacity
+  // for a specific model, hitting other accounts won't magically spawn GPUs.
+  // Don't fan out, don't lock the account. Just cooldown the model.
+  { text: "no capacity available",     shouldFallback: false, cooldownMs: COOLDOWN.short },
   { text: "capacity",                  backoff: true },
   { text: "overloaded",                backoff: true },
 

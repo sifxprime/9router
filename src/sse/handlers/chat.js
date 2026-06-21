@@ -216,6 +216,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
+  // "Test Connection" probes set this header to force a fresh upstream call
+  // even when cached modelLock cooldowns would normally exclude the account.
+  // Without this, a model that already recovered upstream would keep showing
+  // a 30-min-stale error in the dashboard.
+  const bypassModelLock = request?.headers?.get("x-bypass-modellock") === "1";
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
@@ -223,7 +228,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { bypassModelLock });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {

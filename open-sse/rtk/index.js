@@ -14,6 +14,13 @@ export function compressMessages(body, enabled) {
     return compressKiroFormat(body, enabled);
   }
 
+  // Gemini / Antigravity / Vertex format — tool results live in
+  // body.contents[].parts[].functionResponse, OR body.request.contents[].parts[]
+  // for Antigravity-wrapped envelopes. Both shapes share the same parts schema.
+  if (Array.isArray(body.contents) || Array.isArray(body?.request?.contents)) {
+    return compressGeminiFormat(body, enabled);
+  }
+
   // Support both OpenAI/Claude "messages" and OpenAI Responses "input"
   const items = Array.isArray(body.messages) ? body.messages
     : Array.isArray(body.input) ? body.input
@@ -85,6 +92,61 @@ export function compressMessages(body, enabled) {
     return null;
   }
   return stats;
+}
+
+// Compress Gemini / Antigravity / Vertex format:
+//   body.contents[].parts[].functionResponse.response.{ result | output | content }
+//   Antigravity wraps the same shape in body.request.contents, so unwrap that.
+//
+// Tool results from Gemini live in:
+//   { role: "user", parts: [{ functionResponse: { name, response: { result: "stringified output" } } }] }
+// or sometimes:
+//   functionResponse.response.output  / .content   (depends on tool family)
+// We compress whichever string field exists.
+function compressGeminiFormat(body, enabled) {
+  const stats = { bytesBefore: 0, bytesAfter: 0, hits: [] };
+  try {
+    const contents = Array.isArray(body.contents) ? body.contents
+      : Array.isArray(body?.request?.contents) ? body.request.contents
+      : [];
+    for (const turn of contents) {
+      const parts = Array.isArray(turn?.parts) ? turn.parts : [];
+      for (const part of parts) {
+        const fr = part?.functionResponse;
+        if (!fr || typeof fr !== "object") continue;
+        const resp = fr.response;
+        if (!resp || typeof resp !== "object") continue;
+        compressGeminiResponseObject(resp, stats);
+      }
+    }
+  } catch (e) {
+    console.warn("[RTK] compressGeminiFormat error:", e.message);
+    return null;
+  }
+  return stats;
+}
+
+// Gemini functionResponse.response varies in shape across translators and
+// providers. Walk known string-bearing fields up to two levels deep:
+//   { result: "stringy ls output" }                  ← direct
+//   { result: { result: "stringy ls output" } }      ← openai-to-gemini double-nests
+//   { output: "shell output" }                       ← some agent runtimes
+//   { content: "..."}                                ← seen in custom MCP wrappers
+function compressGeminiResponseObject(obj, stats) {
+  if (!obj || typeof obj !== "object") return;
+  for (const field of ["result", "output", "content"]) {
+    const v = obj[field];
+    if (typeof v === "string") {
+      obj[field] = compressText(v, stats, "gemini-functionResponse");
+    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+      // One level of nesting (e.g., openai-to-gemini emits { result: { result: "..." } })
+      for (const inner of ["result", "output", "content"]) {
+        if (typeof v[inner] === "string") {
+          v[inner] = compressText(v[inner], stats, "gemini-functionResponse-nested");
+        }
+      }
+    }
+  }
 }
 
 // Compress Kiro format: conversationState.history[].userInputMessage.userInputMessageContext.toolResults[].content[].text
