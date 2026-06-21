@@ -16,9 +16,31 @@ export default function NoAuthProxyCard({ providerId }) {
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshResult, setRefreshResult] = useState(null);
 
   const providerInfo = AI_PROVIDERS[providerId];
   const defaultBaseUrl = providerInfo?.searchConfig?.baseUrl || "";
+  const hasLiveCatalog = providerInfo?.passthroughModels === true || !!providerInfo?.modelsFetcher;
+
+  const handleRefreshModels = async () => {
+    setRefreshing(true);
+    setRefreshResult(null);
+    try {
+      const res = await fetch(`/api/providers/${providerId}/models`, { cache: "no-store" });
+      const data = res.ok ? await res.json() : null;
+      if (res.ok && Array.isArray(data?.models)) {
+        setRefreshResult({ kind: "ok", count: data.models.length });
+      } else {
+        setRefreshResult({ kind: "err", message: data?.error || `HTTP ${res.status}` });
+      }
+    } catch (e) {
+      setRefreshResult({ kind: "err", message: e.message });
+    } finally {
+      setRefreshing(false);
+      setTimeout(() => setRefreshResult(null), 4000);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +129,33 @@ export default function NoAuthProxyCard({ providerId }) {
           <p className="text-xs text-text-muted mt-1">
             Default: {defaultBaseUrl}
           </p>
+        </div>
+      )}
+      {hasLiveCatalog && (
+        <div className="mt-4 pt-4 border-t border-border">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-sm font-medium">Live model catalog</p>
+              <p className="text-xs text-text-muted">
+                Pulled from upstream. Refresh to pick up new free-promo models the vendor just released.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRefreshModels}
+              disabled={refreshing}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-elevated border border-border hover:bg-surface-hover disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[16px]">refresh</span>
+              {refreshing ? "Refreshing..." : "Refresh Models"}
+            </button>
+          </div>
+          {refreshResult?.kind === "ok" && (
+            <p className="text-xs text-green-500 mt-2">Found {refreshResult.count} model{refreshResult.count === 1 ? "" : "s"} from upstream.</p>
+          )}
+          {refreshResult?.kind === "err" && (
+            <p className="text-xs text-red-500 mt-2">Failed: {refreshResult.message}</p>
+          )}
         </div>
       )}
     </Card>

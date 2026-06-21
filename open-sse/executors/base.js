@@ -3,6 +3,12 @@ import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js"
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { parseRetryAfterHeaders } from "../utils/retryHeaders.js";
 import { dbg } from "../utils/debugLog.js";
+import {
+  hasNoImageSupport,
+  markNoImageSupport,
+  isImageRejectionError,
+  stripImagesFromBody,
+} from "../services/imageCapability.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -167,7 +173,11 @@ export class BaseExecutor {
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
-      const transformedBody = this.transformRequest(model, body, stream, credentials);
+      // Proactive image strip: if we've previously learned this model rejects
+      // images, drop them before sending instead of paying a round trip.
+      const cachedNoImages = hasNoImageSupport(this.provider, model);
+      const sourceBody = cachedNoImages ? stripImagesFromBody(body) : body;
+      let transformedBody = this.transformRequest(model, sourceBody, stream, credentials);
       const headers = this.buildHeaders(credentials, stream);
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
@@ -194,6 +204,33 @@ export class BaseExecutor {
         dbg("FETCH", `${this.provider.toUpperCase()} ← ${response.status} | ttft=${Date.now() - fetchT0}ms | ct=${ct} | cl=${cl}`);
 
         if (await tryRetry(urlIndex, response.status, `status ${response.status}`, response)) { urlIndex--; continue; }
+
+        // Self-healing image-rejection retry: if the upstream returned 400
+        // because the model can't handle images, learn it, strip images, and
+        // retry the SAME account once. Only does anything if the body actually
+        // contained images, so no overhead for text-only requests.
+        if (response.status === 400 && !cachedNoImages) {
+          try {
+            const bodyText = await response.clone().text();
+            if (isImageRejectionError(response.status, bodyText)) {
+              markNoImageSupport(this.provider, model);
+              log?.debug?.("IMAGE_CAP", `${this.provider}/${model} → no image support detected, stripping + retrying`);
+              const stripped = stripImagesFromBody(body);
+              transformedBody = this.transformRequest(model, stripped, stream, credentials);
+              const retryBodyStr = JSON.stringify(transformedBody);
+              const retryResponse = await proxyAwareFetch(url, {
+                method: "POST",
+                headers,
+                body: retryBodyStr,
+                signal: mergedSignal,
+              }, proxyOptions);
+              return { response: retryResponse, url, headers, transformedBody };
+            }
+          } catch (e) {
+            // Body read failed — fall through to normal handling
+            dbg("IMAGE_CAP", `error inspecting 400 body: ${e.message}`);
+          }
+        }
 
         if (this.shouldRetry(response.status, urlIndex)) {
           log?.debug?.("RETRY", `${response.status} on ${url}, trying fallback ${urlIndex + 1}`);

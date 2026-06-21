@@ -114,7 +114,13 @@ export class MimoFreeExecutor extends BaseExecutor {
   }
 
   transformRequest(model, body) {
-    return injectSystemMarker(body);
+    // MiMo Free's API only accepts model="mimo-auto" — every other name is
+    // rejected with a 400 "Param Incorrect: Not supported model X". The
+    // dashboard + CLI sometimes pass through aliases like "gpt-4" or
+    // "Qwen2.5-Coder" from Test All or legacy combos. Force the canonical
+    // model name regardless of what the caller specified.
+    const withSystem = injectSystemMarker(body);
+    return { ...withSystem, model: "mimo-auto" };
   }
 
   async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
