@@ -157,7 +157,16 @@ export default function ModelSelectModal({
   useEffect(() => {
     if (!isOpen) return;
     const seen = new Set();
-    filteredActiveProviders.forEach((conn) => {
+
+    // Build a unified list of providers to check for live-fetching:
+    // 1. All active connected providers
+    // 2. All no-auth providers (since they don't have db connections)
+    const providersToCheck = [
+      ...filteredActiveProviders,
+      ...NO_AUTH_PROVIDER_IDS.map(id => ({ provider: id, id }))
+    ];
+
+    providersToCheck.forEach((conn) => {
       const info = AI_PROVIDERS[conn.provider];
       if (!info) return;
       // Two reasons to live-fetch:
@@ -249,8 +258,15 @@ export default function ModelSelectModal({
             value: fullModel,
           }));
 
+        const liveData = liveModels[providerId];
+        const knownAliasIds = new Set(aliasModels.map((m) => m.id));
+        const liveFetchedModels = (liveData?.models || [])
+          .filter(m => m?.id && !knownAliasIds.has(m.id))
+          .map(m => ({ id: m.id, name: m.name || m.id, value: `${alias}/${m.id}`, isLive: true }));
+
+        let combined = [...aliasModels, ...liveFetchedModels];
+
         // For typed kinds, only include hardcoded typed models (aliases are typically LLM-only and lack type info)
-        let combined = aliasModels;
         if (kindFilter && TYPED_KINDS.has(kindFilter)) {
           combined = getModelsByProviderId(providerId)
             .filter((m) => m.type === kindFilter)
@@ -262,7 +278,9 @@ export default function ModelSelectModal({
           }
         }
 
-        if (combined.length > 0) {
+        const showEmptyForStatus = combined.length === 0 && (liveData?.loading || liveData?.error);
+
+        if (combined.length > 0 || showEmptyForStatus) {
           // Check for custom name from providerNodes (for compatible providers)
           const matchedNode = providerNodes.find(node => node.id === providerId);
           const displayName = matchedNode?.name || providerInfo.name;
@@ -272,6 +290,12 @@ export default function ModelSelectModal({
             alias: alias,
             color: providerInfo.color,
             models: combined,
+            liveStatus: liveData ? {
+              loading: !!liveData.loading,
+              error: liveData.error || null,
+              source: liveData.source,
+              liveCount: (liveData.models || []).length,
+            } : null
           };
         }
       } else if (isCustomProvider) {
