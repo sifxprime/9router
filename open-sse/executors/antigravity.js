@@ -246,6 +246,31 @@ export class AntigravityExecutor extends BaseExecutor {
     return null;
   }
 
+  // Called by parseUpstreamError when forming the result that drives
+  // markAccountUnavailable. We must propagate Google's precise retryDelay
+  // (from the JSON body, NOT from headers — Google does not set headers)
+  // so the account lock matches the real reset time. Without this, the
+  // default ~30s cooldown burns through accounts every minute.
+  parseError(response, bodyText) {
+    if (response.status !== HTTP_STATUS.RATE_LIMITED &&
+        response.status !== HTTP_STATUS.SERVICE_UNAVAILABLE) {
+      return null;
+    }
+    let errorJson = null;
+    try { errorJson = JSON.parse(bodyText); } catch { /* not JSON */ }
+    let retryMs = errorJson ? this.parseRetryFromErrorJson(errorJson) : null;
+    if (!retryMs) {
+      const errorMessage = errorJson?.error?.message || errorJson?.message || bodyText || "";
+      retryMs = this.parseRetryFromErrorMessage(errorMessage);
+    }
+    const message = errorJson?.error?.message || errorJson?.message || bodyText || "";
+    return {
+      status: response.status,
+      message,
+      resetsAtMs: retryMs ? Date.now() + retryMs : null,
+    };
+  }
+
   async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
