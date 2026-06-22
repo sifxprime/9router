@@ -18,6 +18,7 @@ import {
   recordProviderSuccess,
   recordProviderFailure,
 } from "../../src/shared/utils/circuitBreaker.js";
+import { findOffendingField } from "../services/modelStrip.js";
 import {
   getValidApiKey,
   recordKeyFailure,
@@ -263,11 +264,12 @@ export class BaseExecutor {
 
         if (await tryRetry(urlIndex, response.status, `status ${response.status}`, response)) { urlIndex--; continue; }
 
-        // Tool limit self-healing (0.5.30): if the upstream returned 400
-        // because we sent too many tools, strip non-essential ones and retry.
+        // Reactive error self-healing (0.5.30-0.5.31): handle 400 Bad Request
         if (response.status === 400) {
           try {
             const bodyText = await response.clone().text();
+
+            // 1. Tool limit exceeded (e.g. DeepSeek/OSS models)
             if (isToolLimitError(response.status, bodyText)) {
               log?.info?.("TOOL_LIMIT", `${this.provider}/${model} → too many tools, stripping and retrying`);
               const stripped = stripNonEssentialTools(sourceBody);
@@ -277,8 +279,22 @@ export class BaseExecutor {
               }, proxyOptions);
               return { response: retryResponse, url, headers, transformedBody };
             }
+
+            // 2. Unsupported parameter specified by name in the error body
+            const offendingField = findOffendingField(bodyText);
+            if (offendingField) {
+              log?.info?.("MODEL_STRIP", `${this.provider}/${model} → rejected field '${offendingField}', stripping and retrying`);
+              const stripped = { ...sourceBody };
+              delete stripped[offendingField];
+              transformedBody = this.transformRequest(model, stripped, stream, effectiveCredentials);
+              const retryResponse = await proxyAwareFetch(url, {
+                method: "POST", headers, body: JSON.stringify(transformedBody), signal: mergedSignal
+              }, proxyOptions);
+              return { response: retryResponse, url, headers, transformedBody };
+            }
+
           } catch (e) {
-            dbg("TOOL_LIMIT", `error inspecting 400 body: ${e.message}`);
+            dbg("RECOVERY", `error inspecting 400 body: ${e.message}`);
           }
         }
 

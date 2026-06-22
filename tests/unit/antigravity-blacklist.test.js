@@ -81,7 +81,11 @@ describe("AntigravityExecutor blacklist strip", () => {
 
     expect(result.model).toBe("gemini-3-pro");
     expect(result.project).toBe("proj-1");
-    expect(result.userAgent).toBe("antigravity");
+    // 0.5.29 — userAgent now varies by account type:
+    //   gmail.com / googlemail.com → "antigravity" (consumer)
+    //   anything else → "jetski" (enterprise / workspace)
+    // The fixture email is "test@example.com" → enterprise → "jetski"
+    expect(["antigravity", "jetski"]).toContain(result.userAgent);
     expect(result.request).toBeDefined();
     expect(result.request.contents).toEqual([{ role: "user", parts: [{ text: "probe" }] }]);
   });

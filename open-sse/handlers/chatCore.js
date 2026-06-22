@@ -8,6 +8,8 @@ import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
+import { resolveDeprecatedModel } from "../services/modelDeprecation.js";
+import { stripUnsupportedFields } from "../services/modelStrip.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
@@ -46,7 +48,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const modelTargetFormat = getModelTargetFormat(alias, model);
   const targetFormat = modelTargetFormat || getTargetFormat(provider);
   const stripList = getModelStrip(alias, model);
-  const upstreamModel = getModelUpstreamId(alias, model);
+  // Model Deprecation (0.5.31): auto-upgrade legacy models to their successors
+  const upstreamModelRaw = getModelUpstreamId(alias, model);
+  const upstreamModel = resolveDeprecatedModel(upstreamModelRaw) || upstreamModelRaw;
+  if (upstreamModel !== upstreamModelRaw) {
+    log?.debug?.("MODEL", `auto-upgraded deprecated model: ${upstreamModelRaw} → ${upstreamModel}`);
+  }
 
   // Inject provider-level thinking config override (only if client hasn't set)
   // on/off → extended type (body.thinking), none/low/medium/high → effort type (body.reasoning_effort)
@@ -149,6 +156,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     injectPonytail(translatedBody, finalFormat, ponytailLevel);
     log?.debug?.("PONYTAIL", `${ponytailLevel} | ${finalFormat}`);
   }
+
+  // Model Strip (0.5.31): proactively drop fields that break specific providers
+  // (e.g. Groq rejecting logprobs) so the request doesn't instantly 400.
+  translatedBody = stripUnsupportedFields(translatedBody, provider);
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
