@@ -287,15 +287,17 @@ async function getGeminiUsage(accessToken, providerSpecificData, proxyOptions = 
         if (!bucket.modelId || bucket.remainingFraction == null) continue;
 
         const remainingFraction = Number(bucket.remainingFraction) || 0;
-        const total = 1000; // Normalized base, matches antigravity convention
-        const remaining = Math.round(total * remainingFraction);
-        const used = Math.max(0, total - remaining);
+        const remainingPercentage = remainingFraction * 100;
+        // Real percentages instead of fake X/1000 (see Antigravity 0.5.25 note above).
+        const remaining = Math.round(remainingPercentage);
+        const used = Math.max(0, 100 - remaining);
 
         quotas[bucket.modelId] = {
           used,
-          total,
+          total: 100,
+          remaining,
           resetAt: parseResetTime(bucket.resetTime),
-          remainingPercentage: remainingFraction * 100,
+          remainingPercentage,
           unlimited: false,
         };
       }
@@ -430,15 +432,19 @@ async function getAntigravityUsage(accessToken, providerSpecificData, proxyOptio
         const remainingFraction = info.quotaInfo.remainingFraction || 0;
         const remainingPercentage = remainingFraction * 100;
 
-        // Convert percentage to used/total for UI compatibility
-        const total = 1000; // Normalized base
-        const remaining = Math.round(total * remainingFraction);
-        const used = total - remaining;
+        // Express as real percentages (0.5.25): Google only gives us a
+        // remainingFraction — there's no real request count. Use total=100
+        // so the UI reads "X / 100" (i.e. X% used) instead of the old fake
+        // "X / 1000" that confused users into thinking it was a true counter.
+        // Matches the Claude quota format (utilization-based).
+        const used = Math.round(100 - remainingPercentage);
+        const remaining = Math.round(remainingPercentage);
 
         // Use modelKey as key (matches PROVIDER_MODELS id)
         quotas[modelKey] = {
           used,
-          total,
+          total: 100,
+          remaining,
           resetAt: parseResetTime(info.quotaInfo.resetTime),
           remainingPercentage,
           unlimited: false,

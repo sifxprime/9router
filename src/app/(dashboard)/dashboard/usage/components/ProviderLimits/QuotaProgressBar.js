@@ -106,7 +106,13 @@ export default function QuotaProgressBar({
       {/* Usage details and countdown */}
       <div className="flex items-center justify-between text-xs text-text-muted">
         <span>
-          {used.toLocaleString()} / {total.toLocaleString()} requests
+          {/* Percentage-only quotas (Antigravity/Gemini/Claude — total=100 means
+              the upstream API only exposes a fraction, not raw counts) display
+              as "X% used" instead of "X / 100 requests" which misleads users
+              into thinking 100 is a real cap. */}
+          {total === 100
+            ? `${used}% used`
+            : `${used.toLocaleString()} / ${total.toLocaleString()} requests`}
         </span>
         {countdown !== "-" && (
           <div className="flex items-center gap-1">

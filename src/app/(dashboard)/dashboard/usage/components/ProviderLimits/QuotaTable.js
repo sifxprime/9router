@@ -181,7 +181,9 @@ export default function QuotaTable({
 
                       <div className={`flex items-center justify-between ${compact ? "text-[10px]" : "text-xs"}`}>
                         <span className="text-text-muted">
-                          {quota.used.toLocaleString()} / {quota.total > 0 ? quota.total.toLocaleString() : "∞"}
+                          {quota.total === 100
+                            ? `${quota.used}% used`
+                            : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`}
                         </span>
                         <span className={`font-medium ${colors.text}`}>
                           {quota.remaining}%

@@ -45,8 +45,8 @@ describe("Gemini CLI usage project id resolution", () => {
       null
     );
     expect(usage.quotas["gemini-3-flash-preview"]).toMatchObject({
-      used: 250,
-      total: 1000,
+      used: 25,
+      total: 100,
       remainingPercentage: 75,
     });
   });
