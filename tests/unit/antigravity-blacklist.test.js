@@ -24,6 +24,7 @@ describe("AntigravityExecutor blacklist strip", () => {
     "reasoning",
     "enable_thinking",
     "thinking_budget",
+    "thinkingConfig",
     "stream",
   ];
 
