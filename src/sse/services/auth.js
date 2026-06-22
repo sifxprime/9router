@@ -1,6 +1,7 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, updateProviderConnectionAtomic, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
+import { isAccountAboveThreshold, warmQuotaCache, invalidateQuotaCache } from "open-sse/services/quotaPreflight.js";
 import { rankConnections, scoreOf } from "@/shared/services/connectionHealth";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
@@ -61,14 +62,30 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       return null;
     }
 
+    // Warm the quota cache for all this provider's connections so the
+    // synchronous threshold check below has fresh data on subsequent requests.
+    // Fire-and-forget — first request after restart still proceeds without
+    // gating (we fail open when cache is cold).
+    warmQuotaCache(connections);
+
     // Filter out model-locked and excluded connections.
     // bypassModelLock=true is used by "Test Connection" flows — we want to actually
     // call upstream to discover the current state of a model, not show cached locks.
+    // Quota preflight (0.5.27): also skip connections whose remaining quota for
+    // this model is at or below the threshold. Pure cache-lookup, no I/O.
+    const quotaSkipped = [];
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (!options.bypassModelLock && isModelLockActive(c, model)) return false;
+      if (!options.bypassModelLock && model && !isAccountAboveThreshold(c.provider, c.id, model)) {
+        quotaSkipped.push(c.id);
+        return false;
+      }
       return true;
     });
+    if (quotaSkipped.length > 0) {
+      log.debug("AUTH", `${provider} | quota-preflight skipped ${quotaSkipped.length} (below threshold): ${quotaSkipped.map(id => id.slice(0,8)).join(",")}`);
+    }
 
     log.debug("AUTH", `${provider} | available: ${availableConnections.length}/${connections.length}`);
     connections.forEach(c => {
@@ -287,6 +304,12 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   });
 
   if (merged && outcome.shouldFallback) {
+    // Invalidate the quota preflight cache for this connection so the next
+    // request re-fetches fresh upstream numbers instead of waiting up to 60s
+    // for the cache to expire. After a 429, the cached "X% remaining" is
+    // certainly wrong.
+    if (provider) invalidateQuotaCache(provider, connectionId);
+
     const lockLabel = outcome.accountLock ? "WHOLE ACCOUNT" : lockKey;
     log.warn("AUTH", `${connName} locked ${lockLabel} for ${Math.round(outcome.cooldownMs / 1000)}s [${status}]`);
     // Extra-loud notice for account-level locks — these need human action

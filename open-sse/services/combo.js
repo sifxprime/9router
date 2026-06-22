@@ -10,6 +10,34 @@
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
+import { bestScoreForProviderModel } from "./quotaPreflight.js";
+import { parseModel } from "./model.js";
+
+// Quota-aware combo ordering (0.5.27).
+// Sort combo entries so the model with the highest remaining quota across
+// any of its provider's accounts tries first. Entries with no quota info
+// keep their declared position relative to each other (stable sort).
+// Returns a new array; never mutates input.
+function reorderByQuota(models) {
+  if (!Array.isArray(models) || models.length < 2) return models;
+  const scored = models.map((modelStr, originalIndex) => {
+    const { provider, model } = parseModel(modelStr);
+    if (!provider || !model) return { modelStr, score: null, originalIndex };
+    return { modelStr, score: bestScoreForProviderModel(provider, model), originalIndex };
+  });
+  const hasAnyScore = scored.some(s => s.score !== null);
+  if (!hasAnyScore) return models;
+  // Items with a score sort by score DESC; null-scored items keep relative order
+  // and sit AFTER scored items so we prefer known-good over unknown.
+  scored.sort((a, b) => {
+    if (a.score === null && b.score === null) return a.originalIndex - b.originalIndex;
+    if (a.score === null) return 1;
+    if (b.score === null) return -1;
+    if (b.score !== a.score) return b.score - a.score;
+    return a.originalIndex - b.originalIndex;
+  });
+  return scored.map(s => s.modelStr);
+}
 
 // Hard capabilities = input modalities. Missing one drops request data
 // silently (e.g. image stripped before reaching the model). MUST be
@@ -230,6 +258,18 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       }
       rotatedModels = reordered;
     }
+  }
+
+  // Quota-aware ordering (0.5.27): float entries whose provider has the most
+  // remaining quota for that model to the front. Capability sort still wins
+  // when both apply because we run AFTER it — quota reorder only swaps within
+  // the capability-compatible group.
+  if (autoSwitch) {
+    const reorderedByQuota = reorderByQuota(rotatedModels);
+    if (reorderedByQuota[0] !== rotatedModels[0]) {
+      log?.info?.("COMBO", `Quota auto-switch: ${reorderedByQuota[0]} has most remaining quota → tried first`);
+    }
+    rotatedModels = reorderedByQuota;
   }
   
   let lastError = null;
