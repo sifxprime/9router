@@ -102,13 +102,19 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Hoisted up so the translateRequest call below can pass preserveCacheControl.
   const cacheControlMode = settings?.cacheControlMode || "auto";
 
+  const isClaudeShapeUpstream = provider === "claude" || (typeof provider === "string" && provider.startsWith("anthropic-compatible"));
+  const isClaudeDirectCachePath =
+    cacheControlMode === "never" ? false :
+    cacheControlMode === "always" ? isClaudeShapeUpstream :
+    /* "auto" */ (passthrough && clientTool === "claude" && provider === "claude");
+
   let translatedBody;
   let toolNameMap;
   if (passthrough) {
     log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
     translatedBody = { ...body, model: upstreamModel };
     // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API rejects
-    if (clientTool === "claude") normalizeClaudePassthrough(translatedBody, upstreamModel);
+    if (clientTool === "claude" && !isClaudeDirectCachePath) normalizeClaudePassthrough(translatedBody, upstreamModel);
   } else {
     // 0.5.33 — pass cacheControlMode=="always" to skip cache_control mutations
     // on the translated Claude-shape request as well as the passthrough path.
@@ -124,7 +130,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   // Dedupe duplicate built-in tools when equivalent MCP tools are present (Claude clients only).
-  if (clientTool === "claude" && Array.isArray(translatedBody.tools)) {
+  if (clientTool === "claude" && !isClaudeDirectCachePath && Array.isArray(translatedBody.tools)) {
     const { tools: deduped, stripped } = dedupeTools(translatedBody.tools);
     if (stripped.length > 0) {
       translatedBody.tools = deduped;
@@ -152,12 +158,6 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   //   "never":  legacy — always mutate even on Claude direct (escape hatch if
   //             an upstream ever rejects our cache_control markers)
   // cacheControlMode is hoisted above (line ~104) so translateRequest sees it.
-  const isClaudeShapeUpstream = provider === "claude" || (typeof provider === "string" && provider.startsWith("anthropic-compatible"));
-  const isClaudeDirectCachePath =
-    cacheControlMode === "never" ? false :
-    cacheControlMode === "always" ? isClaudeShapeUpstream :
-    /* "auto" */ (passthrough && clientTool === "claude" && provider === "claude");
-
   // TTS models don't support tool messages/function calling
   if (getModelType(alias, model) === "tts" && translatedBody.messages) {
     translatedBody.messages = translatedBody.messages.filter(msg => msg.role !== "tool");
