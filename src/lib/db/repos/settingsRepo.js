@@ -45,6 +45,19 @@ const DEFAULT_SETTINGS = {
   emergencyFallbackProvider: "nvidia",
   emergencyFallbackModel: "openai/gpt-oss-120b",
   emergencyFallbackSkipForTools: true,
+  // 0.5.33 — cache-control preservation mode for Claude-shape upstreams.
+  //   "auto"   = (default) skip mutations only in Claude direct passthrough
+  //              (clientTool === "claude" && provider === "claude"). Other
+  //              translation paths still apply prepareClaudeRequest as before.
+  //   "always" = paranoid mode. Skip cache_control mutations everywhere a
+  //              Claude-shape request flows through, including the explicit
+  //              translator path (prepareClaudeRequest preserveCacheControl).
+  //              Use when routing through `anthropic-compatible-cc-*` resellers
+  //              or any upstream you want byte-stable.
+  //   "never"  = legacy behaviour from before 0.5.32. Always strip and rewrite
+  //              cache_control. Available as an escape hatch if a future
+  //              upstream rejects ttl="1h" markers we want to remove.
+  cacheControlMode: "auto",
 };
 
 async function readRaw() {

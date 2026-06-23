@@ -207,3 +207,98 @@ export function clearQuotaCache() {
 export function _setQuotaCacheEntry(provider, connectionId, byModel) {
   cache.set(cacheKey(provider, connectionId), { byModel, fetchedAt: nowMs() });
 }
+
+// 0.5.33 — quota tracker hardening (Tier 3.C)
+// ===========================================
+// Three improvements layered on top of the existing cache:
+//   1. getQuotaCacheInfo(provider, connectionId) — surface freshness to the
+//      dashboard so users see "last checked Xs ago" per connection.
+//   2. forceRefreshQuota(provider, connectionId, connection) — bypass cache,
+//      hit the upstream usage API now, return fresh data. Backs the "Refresh
+//      now" button per connection.
+//   3. Background refresh: every REFRESH_INTERVAL_MS, refresh every account
+//      that was used in the last RECENT_WINDOW_MS. Cold-cache first-request
+//      latency on returning users disappears.
+
+const REFRESH_INTERVAL_MS = 60 * 1000;       // 60s — same as upstream cache TTL
+const RECENT_WINDOW_MS = 30 * 60 * 1000;     // refresh accounts touched in last 30 min
+const lastUsedAt = new Map();                // key → ts of last hot-path read
+
+// Hook into the hot-path read so we know which accounts deserve background refresh
+const _origIsAboveThreshold = isAccountAboveThreshold;
+// re-export under same name with side-effect on read (Map.set is sub-microsecond)
+// We can't redefine an exported const, so we wrap by patching the module's
+// recordReadAccount the auth picker should call AFTER it has picked.
+export function recordQuotaCacheHit(provider, connectionId) {
+  if (!provider || !connectionId) return;
+  lastUsedAt.set(cacheKey(provider, connectionId), nowMs());
+}
+
+// Returns { freshMs, lastCheckedAt, lastCheckedAgoSec, isFresh, isStale, hasData }.
+// Used by the dashboard to render "last checked Xs ago" badges.
+export function getQuotaCacheInfo(provider, connectionId) {
+  const key = cacheKey(provider, connectionId);
+  const entry = cache.get(key);
+  if (!entry) return { hasData: false, isFresh: false, isStale: true };
+  const now = nowMs();
+  const ageMs = now - entry.fetchedAt;
+  return {
+    hasData: true,
+    isFresh: ageMs < CACHE_TTL_MS,
+    isStale: ageMs >= CACHE_MAX_STALE_MS,
+    lastCheckedAt: new Date(entry.fetchedAt).toISOString(),
+    lastCheckedAgoSec: Math.round(ageMs / 1000),
+    modelCount: entry.byModel ? Object.keys(entry.byModel).length : 0,
+  };
+}
+
+// Manual refresh — bypasses cache, hits the upstream usage endpoint now.
+// Returns the new byModel map (or null on failure). Updates the cache as a
+// side effect so subsequent reads see the fresh data immediately.
+export async function forceRefreshQuota(provider, connectionId, connection) {
+  if (!provider || !connectionId) return null;
+  // Drop the cache entry first so fetchAndCache doesn't short-circuit on the
+  // inFlight dedup (which keys on a fresh entry being absent).
+  cache.delete(cacheKey(provider, connectionId));
+  inFlight.delete(cacheKey(provider, connectionId));
+  return fetchAndCache(provider, connectionId, connection);
+}
+
+// Background refresh daemon — every REFRESH_INTERVAL_MS, refresh accounts that
+// were used recently. Skips accounts whose cache is still fresh.
+// connectionsProvider() must return an array of full connection objects (with
+// accessToken, providerSpecificData, etc.) so we can call getUsageForProvider.
+let _refreshTimer = null;
+export function startBackgroundQuotaRefresh(connectionsProvider) {
+  if (_refreshTimer) return; // already running
+  _refreshTimer = setInterval(async () => {
+    let connections;
+    try {
+      connections = await connectionsProvider();
+    } catch {
+      return;
+    }
+    if (!Array.isArray(connections) || connections.length === 0) return;
+
+    const now = nowMs();
+    for (const c of connections) {
+      if (!c?.id || !c?.provider) continue;
+      const key = cacheKey(c.provider, c.id);
+      const used = lastUsedAt.get(key) || 0;
+      // Only refresh if (a) used in recent window AND (b) cache stale-ish
+      if (now - used > RECENT_WINDOW_MS) continue;
+      const entry = cache.get(key);
+      if (entry && now - entry.fetchedAt < REFRESH_INTERVAL_MS / 2) continue;
+      // fire-and-forget — overlap is harmless because of inFlight dedup
+      fetchAndCache(c.provider, c.id, c).catch(() => {});
+    }
+  }, REFRESH_INTERVAL_MS);
+  _refreshTimer.unref?.();
+}
+
+export function stopBackgroundQuotaRefresh() {
+  if (_refreshTimer) {
+    clearInterval(_refreshTimer);
+    _refreshTimer = null;
+  }
+}

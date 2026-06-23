@@ -98,6 +98,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const clientTool = detectClientTool(clientRawRequest?.headers || {}, body);
   const passthrough = isNativePassthrough(clientTool, provider);
 
+  // 0.5.33 — cacheControlMode: "auto" | "always" | "never" (see settingsRepo).
+  // Hoisted up so the translateRequest call below can pass preserveCacheControl.
+  const cacheControlMode = settings?.cacheControlMode || "auto";
+
   let translatedBody;
   let toolNameMap;
   if (passthrough) {
@@ -106,7 +110,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API rejects
     if (clientTool === "claude") normalizeClaudePassthrough(translatedBody, upstreamModel);
   } else {
-    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
+    // 0.5.33 — pass cacheControlMode=="always" to skip cache_control mutations
+    // on the translated Claude-shape request as well as the passthrough path.
+    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool, cacheControlMode === "always");
     if (!translatedBody) {
       trackPendingRequest(model, provider, connectionId, false, true);
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
@@ -130,21 +136,27 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Covers both passthrough (source shape) and translated (target shape) flows
   const finalFormat = passthrough ? sourceFormat : targetFormat;
 
-  // 0.5.32 — Claude direct cache preservation
+  // 0.5.32 — Claude direct cache preservation (gated by 0.5.33 cacheControlMode)
   // When client is Claude Desktop / Claude Code talking to the real Anthropic
-  // API (clientTool === "claude" && provider === "claude"), every byte of the
-  // outbound request body is part of Anthropic's prompt cache key. Any
-  // mutation here (RTK trimming tool_results, Caveman injecting a system
-  // block, Ponytail injecting another, etc.) shifts the byte sequence, busts
+  // API, every byte of the outbound request body is part of Anthropic's prompt
+  // cache key. Any mutation here (RTK trimming tool_results, Caveman injecting
+  // a system block, Ponytail injecting another) shifts the byte sequence, busts
   // the cache, and the user is billed for full re-tokenisation of every cached
-  // prefix on every turn. On long sessions this is 3-10x the token cost vs
-  // running Claude Desktop directly.
+  // prefix on every turn.
   //
-  // Solution: skip ALL token-saver mutations for this specific path. The
-  // user's Claude OAuth account on Anthropic still gets the legitimate
-  // cache hits for free, and we still preserve all the other benefits of
-  // routing through kRouter (account rotation, observability, fallback).
-  const isClaudeDirectCachePath = passthrough && clientTool === "claude" && provider === "claude";
+  // Mode behavior:
+  //   "auto"   (default): skip mutations ONLY for Claude direct passthrough
+  //   "always": skip mutations for ANY claude-target request (paranoid mode —
+  //             useful when routing through anthropic-compatible-cc-* resellers
+  //             that also cache aggressively)
+  //   "never":  legacy — always mutate even on Claude direct (escape hatch if
+  //             an upstream ever rejects our cache_control markers)
+  // cacheControlMode is hoisted above (line ~104) so translateRequest sees it.
+  const isClaudeShapeUpstream = provider === "claude" || (typeof provider === "string" && provider.startsWith("anthropic-compatible"));
+  const isClaudeDirectCachePath =
+    cacheControlMode === "never" ? false :
+    cacheControlMode === "always" ? isClaudeShapeUpstream :
+    /* "auto" */ (passthrough && clientTool === "claude" && provider === "claude");
 
   // TTS models don't support tool messages/function calling
   if (getModelType(alias, model) === "tts" && translatedBody.messages) {
@@ -153,7 +165,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   if (isClaudeDirectCachePath) {
-    log?.debug?.("CACHE", `Claude direct passthrough — token savers SKIPPED to preserve Anthropic prompt cache`);
+    log?.debug?.("CACHE", `mode=${cacheControlMode} | token savers SKIPPED to preserve upstream prompt cache (${clientTool} → ${provider})`);
   } else {
     // RTK: compress tool_result content
     const rtkStats = compressMessages(translatedBody, rtkEnabled);

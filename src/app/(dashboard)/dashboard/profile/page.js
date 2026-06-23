@@ -1157,6 +1157,50 @@ export default function ProfilePage() {
           </div>
         </Card>
 
+        {/* Cache Control Mode (0.5.33) */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500 shrink-0">
+              <span className="material-symbols-outlined text-[20px]">database</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">Cache Control</h3>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div className="flex items-start sm:items-center justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm sm:text-base">Mode</p>
+                <p className="text-xs sm:text-sm text-text-muted">
+                  Controls whether kRouter mutates <code>cache_control</code> markers on Claude-shape requests.
+                  Anthropic's prompt cache is byte-keyed; any mutation busts the cache.
+                </p>
+              </div>
+              <select
+                value={settings.cacheControlMode || "auto"}
+                onChange={(e) => updateSetting("cacheControlMode", e.target.value)}
+                disabled={loading}
+                className="w-32 sm:w-44 px-3 py-2 text-sm rounded border border-border bg-bg text-text-main shrink-0"
+              >
+                <option value="auto">Auto (recommended)</option>
+                <option value="always">Always preserve</option>
+                <option value="never">Never preserve (legacy)</option>
+              </select>
+            </div>
+
+            <p className="text-xs text-text-muted italic pt-2 border-t border-border/50">
+              {(settings.cacheControlMode || "auto") === "auto" && (
+                <>Currently <strong>auto</strong>: preserves <code>cache_control</code> only on Claude Desktop / Claude Code passthrough (<code>clientTool==="claude"</code> &amp; <code>provider==="claude"</code>). All other paths mutate as before.</>
+              )}
+              {settings.cacheControlMode === "always" && (
+                <>Currently <strong>always</strong>: preserves <code>cache_control</code> on any Claude-shape target (including <code>anthropic-compatible-*</code> resellers and translated requests). Paranoid mode.</>
+              )}
+              {settings.cacheControlMode === "never" && (
+                <>Currently <strong>never</strong>: legacy 0.5.31-and-earlier behaviour — always strip and rewrite <code>cache_control</code>. Escape hatch only.</>
+              )}
+            </p>
+          </div>
+        </Card>
+
         {/* Network */}
         <Card>
           <div className="flex items-center gap-3 mb-4">

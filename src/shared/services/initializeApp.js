@@ -2,7 +2,7 @@ import os from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
-import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys } from "@/lib/localDb";
+import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys, getProviderConnections } from "@/lib/localDb";
 import {
   enableTunnel, enableTailscale,
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
@@ -17,6 +17,7 @@ import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreTo
 import { startClaudeAutoPing } from "@/shared/services/claudeAutoPing";
 import { startTokenWarmer } from "@/shared/services/tokenWarmer";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
+import { startBackgroundQuotaRefresh } from "open-sse/services/quotaPreflight";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {
@@ -92,6 +93,13 @@ export async function initializeApp() {
     autoStartMitm();
     startClaudeAutoPing();
     startTokenWarmer();
+    // 0.5.33 — background quota refresh for accounts in active use.
+    // Reads getProviderConnections() each tick so newly added accounts pick up
+    // refresh automatically; only fires for accounts whose hot-path read was
+    // recent (recordQuotaCacheHit is called by auth.js after every pick).
+    startBackgroundQuotaRefresh(async () => {
+      try { return await getProviderConnections(); } catch { return []; }
+    });
   } catch (error) {
     console.error("[InitApp] Error:", error);
   }

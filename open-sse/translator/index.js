@@ -72,7 +72,11 @@ function stripContentTypes(body, stripList = []) {
 }
 
 // Translate request: source -> openai -> target
-export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null) {
+// 0.5.33 — preserveCacheControl: when true, prepareClaudeRequest skips its
+// cache_control strip-and-rewrite passes. Set by chatCore when cacheControlMode
+// === "always" so any Claude-shape target preserves the client's existing
+// cache markers byte-for-byte.
+export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null, preserveCacheControl = false) {
   ensureInitialized();
   let result = body;
 
@@ -118,7 +122,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   // Final step: prepare request for Claude format endpoints
   if (targetFormat === FORMATS.CLAUDE) {
     const apiKey = credentials?.accessToken || credentials?.apiKey || null;
-    result = prepareClaudeRequest(result, provider, apiKey, connectionId);
+    result = prepareClaudeRequest(result, provider, apiKey, connectionId, preserveCacheControl);
   }
 
   // Claude cloaking: rename client tools with _cc suffix (anti-ban)

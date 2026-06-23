@@ -6,6 +6,7 @@ import { getUsageForProvider } from "open-sse/services/usage.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
+import { getQuotaCacheInfo, forceRefreshQuota } from "open-sse/services/quotaPreflight.js";
 
 // Detect auth-expired messages returned by usage providers instead of throwing
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
@@ -179,10 +180,58 @@ export async function GET(request, { params }) {
       }
     }
 
-    return Response.json(usage);
+    // 0.5.33 — attach quota-cache freshness so the dashboard can render
+    // "last checked Xs ago" without a second round-trip.
+    const cacheInfo = getQuotaCacheInfo(connection.provider, connection.id);
+    return Response.json({ ...usage, _cacheInfo: cacheInfo });
   } catch (error) {
     const provider = connection?.provider ?? "unknown";
     console.warn(`[Usage] ${provider}: ${error.message}`);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// 0.5.33 — force-refresh endpoint backing the dashboard's "Refresh now" button.
+// Drops the quota cache for this connection, hits the upstream usage API now,
+// returns the fresh quota numbers + freshness info.
+export async function POST(request, { params }) {
+  try {
+    const { connectionId } = await params;
+    const connection = await getProviderConnectionById(connectionId);
+    if (!connection) {
+      return Response.json({ error: "Connection not found" }, { status: 404 });
+    }
+
+    const proxyConfig = await resolveConnectionProxyConfig(connection.providerSpecificData);
+    const proxyOptions = {
+      connectionProxyEnabled: proxyConfig.connectionProxyEnabled === true,
+      connectionProxyUrl: proxyConfig.connectionProxyUrl || "",
+      connectionNoProxy: proxyConfig.connectionNoProxy || "",
+      vercelRelayUrl: proxyConfig.vercelRelayUrl || "",
+      strictProxy: false,
+    };
+
+    // Use the same refresh-and-fetch pipeline as GET so we benefit from token
+    // refresh + apikey eligibility checks.
+    let conn = connection;
+    if (conn.authType === "oauth") {
+      try {
+        const result = await refreshAndUpdateCredentials(conn, false, proxyOptions);
+        conn = result.connection;
+      } catch (e) {
+        return Response.json({ error: `Credential refresh failed: ${e.message}` }, { status: 401 });
+      }
+    }
+
+    // Force-refresh the in-memory quota cache while we're at it (the daemon
+    // would catch up within 60s anyway, but the user just clicked "refresh").
+    forceRefreshQuota(conn.provider, conn.id, conn).catch(() => {});
+
+    const usage = await getUsageForProvider(conn, proxyOptions);
+    const cacheInfo = getQuotaCacheInfo(conn.provider, conn.id);
+    return Response.json({ ...usage, _cacheInfo: cacheInfo, _refreshed: true });
+  } catch (error) {
+    console.warn(`[Usage POST] ${error.message}`);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

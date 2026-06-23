@@ -1,7 +1,7 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, updateProviderConnectionAtomic, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
-import { isAccountAboveThreshold, warmQuotaCache, invalidateQuotaCache } from "open-sse/services/quotaPreflight.js";
+import { isAccountAboveThreshold, warmQuotaCache, invalidateQuotaCache, recordQuotaCacheHit } from "open-sse/services/quotaPreflight.js";
 import { selectAccount, getRoundRobinState, setRoundRobinState } from "open-sse/services/accountSelector.js";
 import { rankConnections, scoreOf } from "@/shared/services/connectionHealth";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
@@ -197,6 +197,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         log.debug("AUTH", `${provider} | health re-rank promoted ${connection.id?.slice(0, 8)} (score ${scoreOf(connection.id).toFixed(0)}) over ${availableConnections[0].id?.slice(0, 8)} (score ${scoreOf(availableConnections[0].id).toFixed(0)})`);
       }
     }
+
+    // 0.5.33 — record hot-path read so the background quota daemon knows
+    // this account is in active use and deserves periodic refresh.
+    recordQuotaCacheHit(connection.provider, connection.id);
 
     const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
 
