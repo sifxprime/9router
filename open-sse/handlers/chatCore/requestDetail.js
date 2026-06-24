@@ -43,12 +43,24 @@ export function extractUsageFromResponse(responseBody) {
     };
   }
 
-  // Gemini format
+  // Gemini format (top-level usageMetadata)
   if (responseBody.usageMetadata) {
     return {
       prompt_tokens: responseBody.usageMetadata.promptTokenCount || 0,
       completion_tokens: responseBody.usageMetadata.candidatesTokenCount || 0,
       reasoning_tokens: responseBody.usageMetadata.thoughtsTokenCount
+    };
+  }
+
+  // 0.5.51 — Antigravity / Cloud Code Assist wraps the Gemini response in
+  // {response: {...usageMetadata, ...}}. Without this branch every Antigravity
+  // request landed in the DB with tokens.prompt_tokens=0 even though Google
+  // billed real tokens — making the Usage page disagree with the Quota tracker.
+  if (responseBody.response?.usageMetadata) {
+    return {
+      prompt_tokens: responseBody.response.usageMetadata.promptTokenCount || 0,
+      completion_tokens: responseBody.response.usageMetadata.candidatesTokenCount || 0,
+      reasoning_tokens: responseBody.response.usageMetadata.thoughtsTokenCount
     };
   }
 
