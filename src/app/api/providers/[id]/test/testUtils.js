@@ -682,6 +682,23 @@ export async function testSingleConnection(id) {
     lastErrorAt: result.valid ? null : new Date().toISOString(),
   };
 
+  // 0.5.44 — On a successful Test Connection, also clear every modelLock_* field
+  // (including modelLock___all, the account-wide verify lock). The original bug:
+  // a 403 'Verify your account' would set modelLock___all = +1h. The user verifies
+  // on Google, clicks Test Connection, it succeeds — but kRouter only cleared
+  // testStatus and lastError, leaving modelLock___all untouched. The picker kept
+  // skipping the account for the rest of the hour even though it was unblocked
+  // upstream. Now Test Connection truly means "this account is good again".
+  if (result.valid) {
+    for (const key of Object.keys(connection || {})) {
+      if (key.startsWith("modelLock_")) {
+        updateData[key] = null;
+      }
+    }
+    updateData.backoffLevel = 0;
+    updateData.rateLimitedUntil = null;
+  }
+
   if (result.refreshed && result.newTokens) {
     if (result.newTokens.accessToken) updateData.accessToken = result.newTokens.accessToken;
     if (result.newTokens.refreshToken) updateData.refreshToken = result.newTokens.refreshToken;
