@@ -211,7 +211,11 @@ const PROVIDER_MODELS_CONFIG = {
     parseResponse: parseCodexModels
   },
   antigravity: {
-    url: "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
+    // 0.5.45 — switched from the dead sandbox URL to the production fetch endpoint.
+    // The previous `daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models`
+    // returned 404 (Google removed it). Use the same production endpoint that
+    // usage.js already uses for the quota fetcher.
+    url: "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     authHeader: "Authorization",
@@ -611,7 +615,13 @@ export async function GET(request, { params }) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log(`Error fetching models from ${effectiveProvider}:`, errorText);
+      // 0.5.45 — truncate the error body in console output. Google's 404 page is
+      // 5KB of inline HTML which spams the user's log and makes everything look
+      // catastrophic. We keep the first 200 chars for debugging context.
+      const compact = typeof errorText === "string"
+        ? errorText.replace(/\s+/g, " ").slice(0, 200)
+        : "";
+      console.log(`Error fetching models from ${effectiveProvider} [${response.status}]: ${compact}`);
       return NextResponse.json(
         { error: `Failed to fetch models: ${response.status}` },
         { status: response.status }
