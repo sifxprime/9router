@@ -94,7 +94,15 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       const locked = isModelLockActive(c, model);
       if (excluded || locked) {
         const lockUntil = getEarliestModelLockUntil(c);
-        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""}`);
+        // 0.5.41 — distinguish per-model lock from account-wide lock. The
+        // previous formatter always said "modelLocked(<model>)" which made
+        // it look like only one model was locked when in reality the WHOLE
+        // account was verify-locked or monthly-quota-locked.
+        const allLocked = !!c.modelLock___all && new Date(c.modelLock___all).getTime() > Date.now();
+        const lockLabel = locked
+          ? (allLocked ? `ACCOUNT-LOCKED until ${lockUntil}` : `modelLocked(${model}) until ${lockUntil}`)
+          : "";
+        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${lockLabel}`);
       }
     });
 

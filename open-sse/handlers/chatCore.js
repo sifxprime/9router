@@ -261,16 +261,26 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const semaphoreKey = buildAccountSemaphoreKey(provider, connectionId || "noauth");
   let releaseSlot = () => {};
   try {
+    // 0.5.41 — timeout dropped from 30s → 5s. The previous 30s stalled the
+    // combo for half a minute per busy account before falling through. 5s is
+    // plenty for a slot to free up if the account is healthy; if it doesn't,
+    // bail and let the combo pick a different account immediately.
     releaseSlot = await acquireAccountSlot(semaphoreKey, {
       maxConcurrency: concurrency,
-      timeoutMs: 30000,
+      timeoutMs: 5000,
       signal: streamController.signal,
     });
   } catch (e) {
     if (e?.code === "SEMAPHORE_QUEUE_FULL" || e?.code === "SEMAPHORE_TIMEOUT") {
-      log?.warn?.("AUTH", `${provider} | semaphore wait failed (${e.code}) for ${connectionId?.slice(0,8)}`);
+      // 0.5.41 — Block this account briefly so the upstream picker skips it
+      // for the next 10s. Prevents the combo from re-selecting this same busy
+      // account on its next retry and re-queueing for another 5s timeout.
+      // 10s is short enough to clear quickly when the in-flight request
+      // finishes, long enough to let the combo cycle through other accounts.
+      markAccountBlocked(semaphoreKey, 10_000);
+      log?.warn?.("AUTH", `${provider} | account ${connectionId?.slice(0,8)} busy — blocked 10s, picker will skip`);
       trackPendingRequest(model, provider, connectionId, false, true);
-      return createErrorResult(HTTP_STATUS.TOO_MANY_REQUESTS, `Account ${connectionId?.slice(0,8)} concurrency wait timed out`);
+      return createErrorResult(HTTP_STATUS.SERVICE_UNAVAILABLE, `Account ${connectionId?.slice(0,8)} busy, try another`);
     }
     throw e;
   }
