@@ -292,6 +292,37 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       ({ shouldFallback, cooldownMs, newBackoffLevel, accountLock, permanent } = checkFallbackError(status, errorText, backoffLevel));
     }
 
+    // 0.5.49 — TPM vs daily-quota disambiguation. Google's `fetchAvailableModels`
+    // quota tracker reports DAILY budget. Their chat endpoint enforces a
+    // SEPARATE per-minute (TPM) rate limit and, frustratingly, sends back the
+    // same "Individual quota reached" 429 body for both. When the quota cache
+    // says the account is healthy on its daily budget for this model but we
+    // STILL got a 429, we are almost certainly hitting the TPM window —
+    // which resets in ~1-3 min, not 30 min. Downgrade the cooldown so the
+    // account comes back into rotation fast instead of being parked for half
+    // an hour with a misleading "quota exhausted" message.
+    const TPM_COOLDOWN_MS = 90 * 1000;
+    const TPM_HEALTHY_QUOTA_THRESHOLD = 10;
+    const errorTextLower = typeof errorText === "string" ? errorText.toLowerCase() : "";
+    const looksLikeQuotaError = errorTextLower.includes("quota reached")
+      || errorTextLower.includes("rate limit")
+      || errorTextLower.includes("too many requests");
+    let isTpmRateLimit = false;
+    if (status === 429 && looksLikeQuotaError && provider && model && connectionId) {
+      // Re-check the cached daily quota for THIS model. If it's well above the
+      // skip threshold, the 429 isn't about daily budget — it's TPM.
+      const dailyOk = isAccountAboveThreshold(provider, connectionId, model, TPM_HEALTHY_QUOTA_THRESHOLD);
+      if (dailyOk) {
+        isTpmRateLimit = true;
+        cooldownMs = TPM_COOLDOWN_MS;
+        shouldFallback = true;
+        accountLock = false;
+        permanent = false;
+        newBackoffLevel = 0;
+      }
+    }
+    var _tpmRateLimit_for_reason = isTpmRateLimit;
+
     // Even on shouldFallback:false, the rule may still set a cooldown so the same
     // broken model isn't re-tried on the next request. Skip the DB write only when
     // no cooldown was specified (legacy default for transient errors).
@@ -330,7 +361,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       // truncated error and has no idea what to do.
       lastError: accountLock && verifyUrl
         ? `Verify your account: ${verifyUrl}`
-        : reason,
+        : (_tpmRateLimit_for_reason ? `TPM rate-limited (per-minute window) — daily quota healthy, retries in ~90s` : reason),
       errorCode: status,
       lastErrorAt: new Date().toISOString(),
       backoffLevel: newBackoffLevel ?? backoffLevel,
