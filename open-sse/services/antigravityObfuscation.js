@@ -72,19 +72,52 @@ export function obfuscateSensitiveWords(text) {
   return result;
 }
 
+// 0.5.43 — Field names whose VALUES are raw binary data (base64-encoded
+// images, audio, PDFs, etc.) and MUST NEVER be touched by string-level
+// obfuscation. Injecting a ZWJ into a base64 blob shifts every subsequent
+// byte → Google rejects the upload with a 400 "base64 decoding failed".
+//
+// Real-world failure that motivated this: a user sent a JPEG inline with
+// Kiro IDE. The JPEG's base64 happened to contain the sub-string "cursor"
+// somewhere in its random byte payload. The regex injected a ZWJ. Google
+// 400'd. Took 6 versions to track down because the corruption is invisible
+// in any text dump (ZWJ is zero-width).
+const BINARY_DATA_FIELDS = new Set([
+  "data",          // Gemini parts[].inlineData.data — raw base64 image/audio
+  "inline_data",   // OpenAI compatibility alias
+  "inlineData",    // some clients send the camelCase wrapper as a string
+  "bytes",         // Anthropic image content blocks
+  "base64",        // generic
+  "b64_json",      // OpenAI image gen response shape (echoed back in history)
+  "image",         // raw base64 image
+]);
+
+function isLikelyDataUrl(s) {
+  return typeof s === "string" && s.length > 32 && s.startsWith("data:") && s.includes(";base64,");
+}
+
 // Convenience: walk an arbitrary body shape and obfuscate every string
 // field (depth-limited so we don't blow the stack on circular bodies).
 // Returns a new object — never mutates input.
-export function obfuscateBodyStrings(body, maxDepth = 8) {
+//
+// Keys listed in BINARY_DATA_FIELDS are passed through unchanged. Strings
+// that look like a data: URL (`data:image/jpeg;base64,...`) are also
+// passed through unchanged regardless of their key name, because some
+// clients embed the whole data URL inside `image_url.url` or `content.text`.
+export function obfuscateBodyStrings(body, maxDepth = 8, parentKey = null) {
   if (maxDepth <= 0) return body;
-  if (typeof body === "string") return obfuscateSensitiveWords(body);
+  if (typeof body === "string") {
+    if (parentKey && BINARY_DATA_FIELDS.has(parentKey)) return body;
+    if (isLikelyDataUrl(body)) return body;
+    return obfuscateSensitiveWords(body);
+  }
   if (Array.isArray(body)) {
-    return body.map(v => obfuscateBodyStrings(v, maxDepth - 1));
+    return body.map(v => obfuscateBodyStrings(v, maxDepth - 1, parentKey));
   }
   if (body && typeof body === "object") {
     const out = {};
     for (const [k, v] of Object.entries(body)) {
-      out[k] = obfuscateBodyStrings(v, maxDepth - 1);
+      out[k] = obfuscateBodyStrings(v, maxDepth - 1, k);
     }
     return out;
   }
