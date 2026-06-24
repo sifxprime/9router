@@ -60,15 +60,41 @@ export async function GET() {
       }
     } catch { }
 
+    // 0.5.48 — lazy-clean: when all modelLock_* fields have expired AND no
+    // permanent ban is set, compute an effective testStatus of "active"
+    // and stop surfacing the stale lastError. The picker already does the
+    // right thing (uses live model-lock state) but the dashboard was
+    // showing accounts as "unavailable" for hours after the underlying
+    // 429 had cleared, with a 6-hour-old quota error attached. Now the UI
+    // matches the quota tracker.
+    const now = Date.now();
+    const computeEffectiveStatus = (c) => {
+      if (c.isPermanentlyBanned) return { testStatus: "banned", lastError: c.lastError };
+      const lockKeys = Object.keys(c).filter(k => k.startsWith("modelLock_"));
+      const hasActiveLock = lockKeys.some(k => {
+        const v = c[k];
+        return v && new Date(v).getTime() > now;
+      });
+      if (hasActiveLock) return { testStatus: c.testStatus, lastError: c.lastError };
+      // Every lock expired AND no permanent ban → account is effectively usable
+      if (c.testStatus === "unavailable") {
+        return { testStatus: "active", lastError: null };
+      }
+      return { testStatus: c.testStatus, lastError: c.lastError };
+    };
+
     // Hide sensitive fields, enrich name for compatible providers
     const safeConnections = connections.map(c => {
       const isCompatible = isOpenAICompatibleProvider(c.provider) || isAnthropicCompatibleProvider(c.provider);
       const name = isCompatible
         ? (c.name || nodeNameMap[c.provider] || c.providerSpecificData?.nodeName || c.provider)
         : c.name;
+      const effective = computeEffectiveStatus(c);
       return {
         ...c,
         name,
+        testStatus: effective.testStatus,
+        lastError: effective.lastError,
         apiKey: undefined,
         accessToken: undefined,
         refreshToken: undefined,
