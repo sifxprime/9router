@@ -100,9 +100,53 @@ export async function initializeApp() {
     startBackgroundQuotaRefresh(async () => {
       try { return await getProviderConnections(); } catch { return []; }
     });
+
+    // 0.5.54 — background token backfill. Walks any historical requestDetails
+    // rows where tokens.prompt_tokens=0 but providerResponse.response.usageMetadata
+    // carries the real Gemini-shape numbers (the bug shipped in <=0.5.50). Runs
+    // ONCE per process start, fully async so startup isn't blocked. Replaces the
+    // need for users to run `krouter backfill-tokens` manually.
+    if (!g.tokenBackfillRan) {
+      g.tokenBackfillRan = true;
+      autoBackfillTokensIfNeeded().catch((e) => console.log("[InitApp] Token backfill skipped:", e.message));
+    }
   } catch (error) {
     console.error("[InitApp] Error:", error);
   }
+}
+
+async function autoBackfillTokensIfNeeded() {
+  // Use the same DB adapter the app already loads — no spawning sqlite3,
+  // no shell-quoting risk. Atomic transaction in a single setImmediate so
+  // we don't block the event loop on a cold start.
+  const { getAdapter } = await import("@/lib/db/driver.js");
+  const db = await getAdapter();
+  const candidates = db.all(
+    `SELECT id, data FROM requestDetails
+       WHERE json_extract(data, '$.tokens.prompt_tokens') = 0
+         AND (json_extract(data, '$.providerResponse.response.usageMetadata.promptTokenCount') IS NOT NULL
+              OR json_extract(data, '$.providerResponse.usageMetadata.promptTokenCount') IS NOT NULL)`
+  );
+  if (!candidates || candidates.length === 0) return;
+  let updated = 0;
+  db.transaction(() => {
+    for (const row of candidates) {
+      try {
+        const d = JSON.parse(row.data);
+        const um = d.providerResponse?.response?.usageMetadata || d.providerResponse?.usageMetadata;
+        if (!um) continue;
+        const promptTokens = um.promptTokenCount || 0;
+        const completionTokens = um.candidatesTokenCount || 0;
+        const reasoningTokens = um.thoughtsTokenCount;
+        if (promptTokens === 0 && completionTokens === 0) continue;
+        d.tokens = { ...(d.tokens || {}), prompt_tokens: promptTokens, completion_tokens: completionTokens };
+        if (reasoningTokens !== undefined) d.tokens.reasoning_tokens = reasoningTokens;
+        db.run(`UPDATE requestDetails SET data = ? WHERE id = ?`, [JSON.stringify(d), row.id]);
+        updated++;
+      } catch { /* skip malformed row */ }
+    }
+  })();
+  if (updated > 0) console.log(`[InitApp] Token backfill: lifted real Gemini token counts into ${updated} historical rows`);
 }
 
 async function autoStartMitm() {
