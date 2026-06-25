@@ -429,16 +429,15 @@ async function getAntigravityUsage(accessToken, providerSpecificData, proxyOptio
           continue;
         }
 
-        const remainingFraction = info.quotaInfo.remainingFraction || 0;
-        const remainingPercentage = remainingFraction * 100;
-
-        // Express as real percentages (0.5.25): Google only gives us a
-        // remainingFraction — there's no real request count. Use total=100
-        // so the UI reads "X / 100" (i.e. X% used) instead of the old fake
-        // "X / 1000" that confused users into thinking it was a true counter.
-        // Matches the Claude quota format (utilization-based).
-        const used = Math.round(100 - remainingPercentage);
-        const remaining = Math.round(remainingPercentage);
+        // 0.5.56 — distinguish "0% remaining" from "no remainingFraction sent".
+        // Google omits remainingFraction entirely on quota-exhausted Claude
+        // models (Opus / Sonnet on free Antigravity — 3-day window). The
+        // previous `|| 0` fallback rendered a red "100% used" bar as if it
+        // were a real measurement. We only know the resetTime in that case.
+        const hasFraction = typeof info.quotaInfo.remainingFraction === "number";
+        const remainingPercentage = hasFraction ? info.quotaInfo.remainingFraction * 100 : null;
+        const used = hasFraction ? Math.round(100 - remainingPercentage) : null;
+        const remaining = hasFraction ? Math.round(remainingPercentage) : null;
 
         // Use modelKey as key (matches PROVIDER_MODELS id)
         quotas[modelKey] = {
@@ -448,6 +447,9 @@ async function getAntigravityUsage(accessToken, providerSpecificData, proxyOptio
           resetAt: parseResetTime(info.quotaInfo.resetTime),
           remainingPercentage,
           unlimited: false,
+          // UI reads this to render "Exhausted • resets <date>" instead of
+          // the misleading 100%-used bar.
+          exhaustedAwaitingReset: !hasFraction,
           displayName: info.displayName || modelKey,
         };
       }

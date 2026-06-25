@@ -69,15 +69,37 @@ export default function QuotaProgressBar({
   used = 0,
   total = 0,
   unlimited = false,
-  resetTime = null
+  resetTime = null,
+  exhaustedAwaitingReset = false
 }) {
   const colors = getColorClasses(percentage);
   const countdown = formatResetTime(resetTime);
   const resetDisplay = formatResetTimeDisplay(resetTime);
-  
+
   // percentage is already remaining percentage (from ProviderLimitCard)
   const remaining = percentage;
-  
+
+  // 0.5.56 — Google's fetchAvailableModels omits remainingFraction on quota-
+  // exhausted Claude models; we only know the resetTime. Render that state
+  // explicitly instead of faking a 100%-used red bar.
+  if (exhaustedAwaitingReset) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-semibold text-text-primary">{label}</span>
+          <span className="font-medium text-amber-500 text-xs">Exhausted</span>
+        </div>
+        <div className="h-2 rounded-full overflow-hidden bg-amber-500/10">
+          <div className="h-full bg-amber-500/40" style={{ width: "100%" }} />
+        </div>
+        <div className="text-xs text-text-muted/80 italic">
+          Awaiting reset{countdown !== "-" ? ` in ${countdown}` : ""}
+          {resetDisplay ? ` (at ${resetDisplay})` : ""}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2">
       {/* Label and percentage */}
