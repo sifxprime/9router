@@ -39,14 +39,15 @@ const HEADERS_TO_REMOVE = new Set([
   "priority",
   // Encoding mismatch: Antigravity uses "gzip, deflate, br"; Electron adds "zstd"
   "accept-encoding",
-  // 0.5.47 — CRITICAL fingerprint leak. kRouter's internal MITM anti-loop
-  // header (x-request-source: local) was being forwarded to Google. The real
-  // Antigravity binary NEVER sends this header. Tokens that always carry
-  // x-request-source are a perfect signal for Google's anti-abuse classifier
-  // to learn "this token is driven by a proxy" → flag → 403 Verify on first
-  // request. This single missing entry in the scrub list is one of the most
-  // likely remaining causes of fresh-account bans. Strip it before outbound.
-  "x-request-source",
+  // 0.5.55 — REVERTED my 0.5.47 addition of "x-request-source" to this list.
+  // It was a misdiagnosis: I thought stripping our internal header would
+  // reduce ban risk, but Google ignores unknown request headers entirely
+  // (RFC 7230 — unknown headers don't affect server behavior). Meanwhile
+  // src/mitm/server.js uses x-request-source: local as the MITM anti-loop
+  // marker (INTERNAL_REQUEST_HEADER) — if it's missing, our own outbound
+  // HTTPS calls re-enter the MITM intercept and Node aborts the stream
+  // with NGHTTP2_INTERNAL_ERROR / "socket hang up". Keep the header on
+  // outbound so the MITM correctly skips our own traffic.
 ]);
 
 // Scrub headers + reorder so Authorization lands last (matches the native
