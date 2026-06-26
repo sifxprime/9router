@@ -3,14 +3,13 @@
 
   # kRouter — Kodelyth AI Infrastructure
 
-  **A hardened fork of [9Router](https://github.com/decolua/9router). Same FREE AI router & token saver — 11 audited security/stability fixes layered on top.**
+  **Hardened FREE AI router & token saver — save 20-40% tokens with RTK + auto-fallback across 40+ AI providers.**
 
   **Never stop coding. Save 20-40% tokens with RTK + auto-fallback to FREE & cheap AI models. Connect Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, Kiro, OpenClaw... to 40+ AI providers & 100+ models — through one local endpoint.**
 
   [![npm](https://img.shields.io/npm/v/@sifxprime/krouter.svg)](https://www.npmjs.com/package/@sifxprime/krouter)
   [![GitHub](https://img.shields.io/badge/github-sifxprime%2Fkrouter-blue?logo=github)](https://github.com/sifxprime/krouter)
   [![License](https://img.shields.io/npm/l/@sifxprime/krouter.svg)](https://github.com/sifxprime/krouter/blob/main/LICENSE)
-  [![Upstream](https://img.shields.io/badge/upstream-decolua%2F9router-orange)](https://github.com/decolua/9router)
 
   [🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🔧 About this fork](#-about-this-fork--sifxprimekrouter)
 
@@ -220,16 +219,6 @@ cd krouter
 git pull origin main
 npm install          # only if package.json changed
 # restart dev/start
-```
-
-### Upstream Fallback
-
-If you don't need this fork's audit fixes, MITM reliability, or Kiro Google/GitHub login, the upstream NPM and Docker artifacts still work (though they lack this fork's changes):
-
-```bash
-npm install -g 9router && 9router
-# or
-docker run -d -p 20128:20128 -v ~/.9router:/root/.9router decolua/9router:latest
 ```
 
 ### Default URLs

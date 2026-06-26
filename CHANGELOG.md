@@ -1,3 +1,9 @@
+# v0.5.62 (2026-06-26) — Documentation update: License & Branding
+
+Documentation-only release. No code changes.
+- README: Removed upstream credit badge from the very first line (moved to attribution section below).
+- LICENSE: Changed copyright header to strictly "K‍odelyth AI Infrastructure" (with full attribution details at the bottom).
+
 # v0.5.61 (2026-06-26) — Docker deployment parity: sifxprime/k‍router
 
 Configured GitHub Actions workflow to publish Docker container images to `sifxprime/k‍router` on Docker Hub (and `ghcr.io/sifxprime/k‍router` on GitHub Container Registry) instead of the old upstream decolua image. Updated README and DOCKER.md with official container execution commands using `sifxprime/k‍router:latest` and `~/.k‍router` data binding.
