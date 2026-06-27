@@ -64,10 +64,14 @@ export async function GET() {
     }
 
     const settings = await readSettings();
+    // 0.5.66 — bug fix: hasKRouter was computed and discarded, so the CLI Tools
+    // index card always showed "Not configured" even when the detail page
+    // correctly read ANTHROPIC_BASE_URL and showed "Connected". Now return it.
     const hasKRouter = !!(settings?.env?.ANTHROPIC_BASE_URL);
 
     return NextResponse.json({
       installed: true,
+      hasKRouter,
       settings: settings,
       settingsPath: getClaudeSettingsPath(),
     });

@@ -1,3 +1,10 @@
+# v0.5.66 (2026-06-28) — Fix Claude CLI Bash safety classifier (gpt-5.5) + CLI Tools connection status
+
+Two bug fixes based on user problem reports:
+
+1. **Claude CLI Bash Safety Classifier Fix (OpenAI/Codex `gpt-5.5`):** Claude CLI makes a safety pre-check before running Bash commands, requesting `max_tokens: 1` to get a single YES/NO token. Recent OpenAI/Codex backend updates strictly reject `max_tokens < 16` with an HTTP 400 error. Claude CLI misinterpreted this 400 as `cx/gpt-5.5 is temporarily unavailable, so auto mode cannot determine the safety of Bash right now.`. k‍Router now enforces a hard floor of `max_tokens: 16` for all OpenAI formats to pass upstream validation.
+2. **CLI Tools Connection Status UI Fix:** Fixed a bug where the CLI Tools index cards on the dashboard always showed `Not configured` even when the tool was fully connected. The settings API routes (`claude`, `cowork`, `jcode`) were computing `hasK‍Router` correctly but omitting it from the JSON response.
+
 # v0.5.65 (2026-06-28) — Kiro IDE first-class support + Caveman/Ponytail mutex
 
 Four bundled fixes from a full kRouter debug pass.
