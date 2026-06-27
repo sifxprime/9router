@@ -2,6 +2,7 @@ import { detectFormat, getTargetFormat } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough } from "../translator/helpers/claudeHelper.js";
+import { bodyHasInvalidToolIds, ensureToolCallIds } from "../translator/helpers/toolCallHelper.js";
 import { COLORS } from "../utils/stream.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
@@ -115,6 +116,20 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     translatedBody = { ...body, model: upstreamModel };
     // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API rejects
     if (clientTool === "claude" && !isClaudeDirectCachePath) normalizeClaudePassthrough(translatedBody, upstreamModel);
+
+    // 0.5.63 — fix the "Google → Claude tool_use.id format" cross-IDE bug.
+    // When a conversation started in Antigravity/Gemini (which emits IDs with
+    // dots, colons, slashes) and is later continued via Claude direct passthrough,
+    // Anthropic rejects the request with 400 invalid_request_error on
+    // `messages.N.content.M.tool_use.id` because of the regex ^[a-zA-Z0-9_-]+$.
+    // The general translator path already runs ensureToolCallIds(), but
+    // passthrough skipped it (especially when cache-preserve was on). We only
+    // pay the mutation cost when bodyHasInvalidToolIds() returns true — clean
+    // Claude-only conversations are byte-identical and prompt cache survives.
+    if (isClaudeShapeUpstream && bodyHasInvalidToolIds(translatedBody)) {
+      log?.warn?.("TOOLS", `${clientTool} → ${provider} | sanitizing tool_use IDs (Gemini-style chars detected)`);
+      ensureToolCallIds(translatedBody);
+    }
   } else {
     // 0.5.33 — pass cacheControlMode=="always" to skip cache_control mutations
     // on the translated Claude-shape request as well as the passthrough path.

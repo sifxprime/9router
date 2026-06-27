@@ -1,3 +1,9 @@
+# v0.5.63 (2026-06-27) — Sanitize tool_use IDs on Claude passthrough (Google-to-Claude cross-IDE fix)
+
+User reported that switching IDEs mid-conversation between Google (Antigravity / Gemini) and Claude was failing. Root cause traced in logs: Anthropic returns `400 invalid_request_error` on `messages.N.content.M.tool_use.id` because Google emits tool_call IDs containing dots/colons/slashes, which violate Claude's required pattern `^[a-zA-Z0-9_-]+$`. The general translator path already calls `ensureToolCallIds()`, but the Claude direct passthrough path (and the cache-preserve branch) skipped it entirely — so a conversation that lived part of its life in Gemini and then continued via Claude direct would get rejected.
+
+Now: before sending to any Claude-shape upstream, we scan the body with a lightweight `bodyHasInvalidToolIds()` predicate. If clean (the common case for Claude-only conversations), nothing mutates and the byte-perfect prompt cache survives. If a Gemini-style ID is detected, we invoke the existing `ensureToolCallIds()` sanitizer once and forward the safe body.
+
 # v0.5.62 (2026-06-26) — Documentation update: License & Branding
 
 Documentation-only release. No code changes.

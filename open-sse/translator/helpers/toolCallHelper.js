@@ -3,6 +3,32 @@
 // Anthropic tool_use.id must match: ^[a-zA-Z0-9_-]+$
 const TOOL_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
+// 0.5.63 — Quick scanner used by the Claude passthrough path to decide
+// whether to invoke the heavier ensureToolCallIds() at all. Returns true
+// the moment it finds ANY id-shaped field whose value would be rejected by
+// Anthropic's regex. Conversations that have only ever lived in Claude
+// format never enter this branch, so the byte-perfect prompt cache stays
+// intact and we don't pay the mutation cost.
+export function bodyHasInvalidToolIds(body) {
+  if (!body || !Array.isArray(body.messages)) return false;
+  const isInvalid = (v) => typeof v === "string" && v.length > 0 && !TOOL_ID_PATTERN.test(v);
+  for (const msg of body.messages) {
+    if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        if (isInvalid(tc?.id)) return true;
+      }
+    }
+    if (msg.role === "tool" && isInvalid(msg.tool_call_id)) return true;
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block?.type === "tool_use" && isInvalid(block.id)) return true;
+        if (block?.type === "tool_result" && isInvalid(block.tool_use_id)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Generate deterministic tool call ID from position + tool name (cache-friendly)
 export function generateToolCallId(msgIndex = 0, tcIndex = 0, toolName = "") {
   const name = toolName ? `_${toolName.replace(/[^a-zA-Z0-9_-]/g, "")}` : "";
