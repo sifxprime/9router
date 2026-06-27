@@ -211,6 +211,40 @@ async function negotiateAlpn(host) {
   });
 }
 
+// 0.5.67 — HTTP/2 Connection Pool. Creating a new h2 session per request and
+// instantly tearing it down triggers Google's load balancer anti-abuse limits
+// (GOAWAY frames → NGHTTP2_INTERNAL_ERROR). Now we reuse the multiplexed
+// session for subsequent requests to the same host, exactly as browsers do.
+const h2Pool = new Map(); // targetHost → { client, activeStreams }
+
+async function getH2Client(targetHost, targetIP) {
+  const existing = h2Pool.get(targetHost);
+  if (existing && !existing.client.closed && !existing.client.destroyed) {
+    return existing;
+  }
+
+  const client = http2.connect(`https://${targetHost}`, {
+    createConnection: () => tls.connect({
+      host: targetIP, port: 443, servername: targetHost,
+      ALPNProtocols: ["h2"], rejectUnauthorized: false,
+    }),
+  });
+
+  const poolEntry = { client, activeStreams: 0 };
+  h2Pool.set(targetHost, poolEntry);
+
+  // Cleanup on close/error/goaway
+  const cleanup = () => {
+    if (h2Pool.get(targetHost) === poolEntry) h2Pool.delete(targetHost);
+    try { client.close(); } catch {}
+  };
+  client.on("error", cleanup);
+  client.on("close", cleanup);
+  client.on("goaway", cleanup);
+
+  return poolEntry;
+}
+
 // HTTP/2 passthrough using node:http2 native
 async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onResponse, dumper) {
   const targetIP = await resolveTargetIP(targetHost);
@@ -227,23 +261,42 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
   h2Headers[":scheme"] = "https";
   h2Headers[":authority"] = targetHost;
 
-  return new Promise((resolve) => {
-    const client = http2.connect(`https://${targetHost}`, {
-      createConnection: () => tls.connect({
-        host: targetIP, port: 443, servername: targetHost,
-        ALPNProtocols: ["h2"], rejectUnauthorized: false,
-      }),
-    });
-    client.once("error", (e) => {
-      err(`[mitm] http2 client error: ${e.message}`);
-      if (dumper) { dumper.writeChunk(`\n[ERROR h2] ${e.message}\n`); dumper.end(); }
+  return new Promise(async (resolve) => {
+    let poolEntry;
+    try {
+      poolEntry = await getH2Client(targetHost, targetIP);
+    } catch (e) {
+      err(`[mitm] http2 connect error: ${e.message}`);
       if (!res.headersSent) res.writeHead(502);
       if (!res.writableEnded) res.end("Bad Gateway");
-      try { client.close(); } catch {}
-      resolve();
-    });
+      return resolve();
+    }
 
-    const stream = client.request(h2Headers, { endStream: bodyBuffer.length === 0 });
+    poolEntry.activeStreams++;
+    const cleanupStream = () => {
+      poolEntry.activeStreams--;
+      // Idle timeout: close session if unused for 30s to prevent stale sockets
+      if (poolEntry.activeStreams === 0) {
+        setTimeout(() => {
+          if (poolEntry.activeStreams === 0) {
+            h2Pool.delete(targetHost);
+            try { poolEntry.client.close(); } catch {}
+          }
+        }, 30000).unref();
+      }
+    };
+
+    let stream;
+    try {
+      stream = poolEntry.client.request(h2Headers, { endStream: bodyBuffer.length === 0 });
+    } catch (e) {
+      // If request() throws (e.g. session was just closed by server), retry once with fresh connection
+      cleanupStream();
+      h2Pool.delete(targetHost);
+      log(`[mitm] http2 request failed on pooled session, retrying...`);
+      return passthroughHttps(req, res, bodyBuffer, headers, targetHost, onResponse, dumper).then(resolve);
+    }
+
     if (bodyBuffer.length > 0) stream.end(bodyBuffer);
 
     stream.once("response", (responseHeaders) => {
@@ -269,18 +322,17 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
         if (dumper) dumper.end();
         if (!res.writableEnded) res.end();
         if (onResponse) try { onResponse(Buffer.concat(chunks), outHeaders); } catch {}
-        try { client.close(); } catch {}
+        cleanupStream();
         resolve();
       });
     });
+
     stream.once("error", (e) => {
-      // 0.5.30 streamRecovery: if Google load-balancer drops the stream
-      // (NGHTTP2_INTERNAL_ERROR) before headers are sent, silently retry
-      // via HTTP/1.1 instead of failing the user's request.
+      cleanupStream();
       const msg = e.message || "";
       if (!res.headersSent && (msg.includes("NGHTTP2") || msg.includes("Stream closed"))) {
         log(`[mitm] http2 stream error (${msg}) — falling back to http/1.1 retry`);
-        try { client.close(); } catch {}
+        h2Pool.delete(targetHost); // Nuke the bad session
         passthroughHttps(req, res, bodyBuffer, headers, targetHost, onResponse, dumper).then(resolve);
         return;
       }
@@ -289,7 +341,6 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
       if (dumper) { dumper.writeChunk(`\n[ERROR h2-stream] ${msg}\n`); dumper.end(); }
       if (!res.headersSent) res.writeHead(502);
       if (!res.writableEnded) res.end();
-      try { client.close(); } catch {}
       resolve();
     });
   });
