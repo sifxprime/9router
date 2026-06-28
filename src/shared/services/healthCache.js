@@ -1,6 +1,6 @@
 import { getProviderConnections, updateProviderConnection } from "@/lib/localDb.js";
 import { getEarliestModelLockUntil, isModelLockActive } from "open-sse/services/accountFallback.js";
-import * as log from "open-sse/utils/logger.js";
+import * as log from "@/sse/utils/logger.js";
 
 // ============================================================================
 // Zenith Health Cache (RAM Layer)

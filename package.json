@@ -1,6 +1,6 @@
 {
   "name": "krouter-app",
-  "version": "0.5.75",
+  "version": "0.5.76",
   "description": "kRouter (Kodelyth Router) web dashboard — Kodelyth AI Infrastructure",
   "private": true,
   "scripts": {

@@ -1,3 +1,7 @@
+# v0.5.76 (2026-06-29) — Fix HealthCache Logger Import
+
+Hotfix: The 0.5.75 release contained an incorrect import path for the logger inside `HealthCache.js` (`open-sse/utils/logger.js` instead of `@/sse/utils/logger.js`), which caused the Next.js build to fail with a "Module not found" error. Corrected the path.
+
 # v0.5.75 (2026-06-29) — Zenith Score Engine: Intelligent Failover Routing
 
 Architectural milestone: k‍Router now uses the `Zenith` scoring engine to intelligently rank and pick accounts.
