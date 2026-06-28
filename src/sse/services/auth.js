@@ -307,8 +307,18 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     const looksLikeQuotaError = errorTextLower.includes("quota reached")
       || errorTextLower.includes("rate limit")
       || errorTextLower.includes("too many requests");
+
+    // 0.5.69 — refuse to downgrade to TPM if Google's message explicitly tells
+    // us the reset window is hours/days away. TPM windows reset in seconds-
+    // to-minutes; if the upstream says "Resets in 2h27m" it's the daily/weekly
+    // bucket, not TPM. Without this guard, stale quota-cache reads kept
+    // re-classifying real daily exhaustion as 90-second TPM, so the picker
+    // re-tried the dead account every 90 s and spammed the log.
+    const hasHoursOrDaysReset = /resets?\s+in\s+\d+h/i.test(errorText || "")
+      || /resets?\s+in\s+\d+\s*(?:hour|day)/i.test(errorText || "");
+
     let isTpmRateLimit = false;
-    if (status === 429 && looksLikeQuotaError && provider && model && connectionId) {
+    if (status === 429 && looksLikeQuotaError && provider && model && connectionId && !hasHoursOrDaysReset) {
       // Re-check the cached daily quota for THIS model. If it's well above the
       // skip threshold, the 429 isn't about daily budget — it's TPM.
       const dailyOk = isAccountAboveThreshold(provider, connectionId, model, TPM_HEALTHY_QUOTA_THRESHOLD);
@@ -321,6 +331,14 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
         newBackoffLevel = 0;
       }
     }
+
+    // 0.5.69 — when we detect an hours/days reset, force-invalidate the cached
+    // quota for this account+model so subsequent picks see fresh data and
+    // don't trip the TPM downgrade on the next request to a different model.
+    if (hasHoursOrDaysReset && provider && connectionId) {
+      try { invalidateQuotaCache(provider, connectionId); } catch { /* ignore */ }
+    }
+
     var _tpmRateLimit_for_reason = isTpmRateLimit;
 
     // Even on shouldFallback:false, the rule may still set a cooldown so the same

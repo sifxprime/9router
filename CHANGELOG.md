@@ -1,3 +1,14 @@
+# v0.5.69 (2026-06-28) — Stop TPM downgrade from re-classifying daily Antigravity exhaustion
+
+User log audit showed two Antigravity accounts spamming the same 429 "Individual quota reached. Resets in 2h27m" error every 90 seconds. Root cause traced to 0.5.49 TPM disambiguation: the code re-classifies "quota reached" 429s as TPM when the cached daily-quota number says the account is healthy. But the quota cache lags behind reality, so real daily exhaustion got downgraded to a 90 s TPM cooldown, and the picker tried the dead account again 90 s later. Loop.
+
+Two-part fix:
+
+1. **Refuse the TPM downgrade when Google explicitly says "Resets in Nh"** or "Resets in N hour(s)/day(s)" - TPM windows reset in seconds-to-minutes, never hours. The new regex (`resets?\s+in\s+\d+h`) catches the exact wording Google ships. Real daily/weekly exhaustion now keeps its honest cooldown (capped at MAX_RATE_LIMIT_COOLDOWN_MS = 30 min) instead of getting reclassified to 90 s.
+2. **Force-invalidate the cached daily quota for the account+model** when we detect an hours/days reset, so subsequent picks see fresh data and don't trip the same TPM trap on the next turn for a different model on the same account.
+
+Net effect: the spammy "Resets in 2h27m" loop stops. Accounts that genuinely have only a TPM bottleneck still get their 90 s fast-path. The dashboard log goes back to being readable.
+
 # v0.5.68 (2026-06-28) — Suppress false-positive MaxListeners warning
 
 Raised `process.setMaxListeners` from 20 to 50 to accommodate the HTTP/2 connection pool added in 0.5.67. Each pooled `http2.connect()` session attaches internal SIGTERM/exit/beforeExit listeners to `process`. With 6+ Antigravity accounts and parallel IDE requests, 21+ sessions can be alive before the 30s idle timeout fires, triggering Node's `MaxListenersExceededWarning`. Not a real memory leak — sessions are cleaned up on idle/error/GOAWAY. The warning is now silenced.
