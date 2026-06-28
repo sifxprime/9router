@@ -13,6 +13,18 @@ import {
   resolveDefaultProfileArn
 } from "../../config/kiroConstants.js";
 
+// 0.5.74 — Sanitize tool IDs to match Anthropic's pattern ^[a-zA-Z0-9_-]+$
+// Kiro routes through Claude backends which enforce this regex. IDs from
+// other providers (Gemini dots/colons, OpenAI slashes) crash with
+// "String should match pattern" if left unsanitized.
+const TOOL_ID_RE = /^[a-zA-Z0-9_-]+$/;
+function sanitizeToolId(id) {
+  if (!id || typeof id !== "string") return uuidv4();
+  if (TOOL_ID_RE.test(id)) return id;
+  const cleaned = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  return cleaned.length > 0 ? cleaned : uuidv4();
+}
+
 /** Render a single tool call as a readable text line. */
 function toolCallToText(name, input) {
   let argStr;
@@ -318,7 +330,7 @@ function convertMessages(messages, tools, model) {
               : (typeof block.content === "string" ? block.content : "");
 
             pendingToolResults.push({
-              toolUseId: block.tool_use_id,
+              toolUseId: sanitizeToolId(block.tool_use_id),
               status: "success",
               content: [{ text: text }]
             });
@@ -330,7 +342,7 @@ function convertMessages(messages, tools, model) {
       if (msg.role === "tool") {
         const toolContent = typeof msg.content === "string" ? msg.content : "";
         pendingToolResults.push({
-          toolUseId: msg.tool_call_id,
+          toolUseId: sanitizeToolId(msg.tool_call_id),
           status: "success",
           content: [{ text: toolContent }]
         });
@@ -370,13 +382,13 @@ function convertMessages(messages, tools, model) {
           lastMsg.assistantResponseMessage.toolUses = toolUses.map(tc => {
             if (tc.function) {
               return {
-                toolUseId: tc.id || uuidv4(),
+                toolUseId: sanitizeToolId(tc.id),
                 name: tc.function.name,
                 input: safeJSONParse(tc.function.arguments, {})
               };
             } else {
               return {
-                toolUseId: tc.id || uuidv4(),
+                toolUseId: sanitizeToolId(tc.id),
                 name: tc.name,
                 input: tc.input || {}
               };

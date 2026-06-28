@@ -220,6 +220,12 @@ export class BaseExecutor {
       let transformedBody = this.transformRequest(model, sourceBody, stream, effectiveCredentials);
       const headers = this.buildHeaders(effectiveCredentials, stream);
 
+      // 0.5.74 — Force MITM anti-loop header on ALL outbound requests,
+      // regardless of whether child executors override buildHeaders() and
+      // forget to include it. Without this, k‍Router's own outbound calls to
+      // intercepted hosts (GitHub, C‍ursor, etc.) crash inside our MITM.
+      headers["x-request-source"] = "local";
+
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
 
       // Abort if upstream doesn't return response headers within connection timeout

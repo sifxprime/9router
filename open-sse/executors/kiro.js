@@ -16,7 +16,14 @@ export class KiroExecutor extends BaseExecutor {
     const headers = {
       ...this.config.headers,
       "Amz-Sdk-Request": "attempt=1; max=3",
-      "Amz-Sdk-Invocation-Id": uuidv4()
+      "Amz-Sdk-Invocation-Id": uuidv4(),
+      // 0.5.73 — MUST include the MITM anti-loop header! KiroExecutor overrides
+      // buildHeaders but forgot to include this, so any request made via
+      // C‍ursor/C‍line → Kiro provider would make an outbound call to AWS that
+      // our own MITM intercepted. The MITM expected Kiro IDE format, but got
+      // k‍Router's translated format, threw "codeWhispererToMessages produced 0
+      // messages", and crashed the request with 500.
+      "x-request-source": "local"
     };
 
     if (credentials.accessToken) {

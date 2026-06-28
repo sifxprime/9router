@@ -9,10 +9,11 @@ const NATIVE_PAIRS = {
   "gemini-cli": ["gemini-cli"],
   "antigravity": ["antigravity"],
   "codex": ["codex", "openai", "commandcode"],
-  // 0.5.65 — Kiro IDE -> Kiro provider. Native passthrough keeps the request
-  // body byte-for-byte identical (preserves AWS Bedrock prompt caching) and
-  // skips the 500-line openai-to-kiro translator entirely.
-  "kiro": ["kiro"],
+  // 0.5.74 — REMOVED kiro from native passthrough. When MITM is active, Kiro
+  // IDE traffic goes: Kiro IDE → MITM handler (converts AWS format to OpenAI)
+  // → k‍Router /v1/chat/completions (OpenAI format). If we passthrough here,
+  // the OpenAI-format body goes directly to Kiro's AWS API which rejects it
+  // with REQUEST_BODY_INVALID. The openai-to-kiro translator MUST run.
 };
 
 /**
@@ -47,17 +48,15 @@ export function detectClientTool(headers = {}, body = {}) {
   // DeepSeek TUI
   if (ua.includes("deepseek-tui")) return "deepseek-tui";
 
-  // 0.5.65 — Kiro IDE detection. Kiro's desktop app and its CodeWhisperer
-  // backend identify themselves with multiple stable signals; checking
-  // any one of them is sufficient. We avoid relying on `aws-sdk-` alone
-  // because that header also appears on Bedrock SDK clients we don't want
-  // to passthrough.
+  // 0.5.74 — Kiro IDE detection. Only match on strong header signals, NOT
+  // body shape. The MITM handler already converts Kiro IDE's AWS format to
+  // OpenAI before it reaches chatCore, so by the time detectClientTool runs
+  // the body is OpenAI-shaped with `messages: []`, not `conversationState`.
+  // Matching on body shape caused false positives and broke the translator.
   if (
     ua.includes("kiro") ||
     headers["x-amzn-codewhisperer-source"] === "kiro" ||
-    headers["x-amz-target"]?.toLowerCase?.().startsWith("amazoncodewhispererservice.") ||
-    body?.userInputMessage !== undefined ||
-    body?.conversationState !== undefined
+    headers["x-amz-target"]?.toLowerCase?.().startsWith("amazoncodewhispererservice.")
   ) {
     return "kiro";
   }

@@ -1,3 +1,13 @@
+# v0.5.74 (2026-06-29) — Fix Kiro MITM passthrough + tool ID sanitization + global MITM anti-loop
+
+Three fixes bundled from a full Kiro IDE debug pass.
+
+1. **REQUEST_BODY_INVALID from Kiro IDE via MITM:** Removed Kiro from `NATIVE_PAIRS`. When MITM is active, Kiro IDE traffic flows: IDE → MITM (converts AWS → OpenAI) → k‍Router → openai-to-kiro translator → Kiro API. Passthrough was skipping the translator and sending OpenAI-format bodies directly to Kiro's AWS API, which rejected them.
+
+2. **codeWhispererToMessages produced 0 messages:** k‍Router's own outbound Kiro requests were being intercepted by its own MITM proxy because child executors (Kiro, GitHub, C‍ursor) overrode `buildHeaders()` without including `x-request-source: local`. Now forced on ALL executors in `BaseExecutor.execute()` after `buildHeaders()` returns.
+
+3. **String should match pattern '^[a-zA-Z0-9_-]+$':** Tool IDs from other providers (Gemini dots/colons, OpenAI slashes) passed through `openai-to-kiro.js` unsanitized into `toolUseId` fields. Kiro routes through Claude backends which enforce Anthropic's regex. Added `sanitizeToolId()` to all 4 places where `toolUseId` is set in the Kiro translator.
+
 # v0.5.73 (2026-06-29) — MITM HTTP/2 Session Auto-Retry
 Fixes an issue where intermittent NGHTTP2_INTERNAL_ERROR drops (Google Cloud Load Balancer dropping stale multiplexed streams) caused the MITM proxy to fall back to HTTP/1.1, which Google's backend often rejects with a `socket hang up`. The proxy now immediately retries the request over a fresh HTTP/2 session before falling back to HTTP/1.1, eliminating the cascade of socket hang up errors.
 
