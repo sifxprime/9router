@@ -1,3 +1,7 @@
+# v0.5.72 (2026-06-28) — Fix Atomesus tool crashing backend
+
+Fixed a bug where Atomesus API would return a 400 error (`"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`) when clients sent tools in the request. Atomesus's inference server does not support tools by default. k‍Router now proactively strips `tools` and `tool_choice` from all requests bound for Atomesus, gracefully degrading them to plain text chat completions.
+
 # v0.5.71 (2026-06-28) — Fix Atomesus alias resolution
 
 Fixed a bug where requesting `atms/cipher` would fail with `No active credentials for provider: atms`. Added `atms` -> `atomesus` mapping to `ALIAS_TO_PROVIDER_ID` in `open-sse/services/model.js` so the router correctly matches the alias against saved `atomesus` API keys in the database.

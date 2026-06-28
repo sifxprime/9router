@@ -63,6 +63,14 @@ export function stripUnsupportedFields(body, provider) {
     delete next.top_logprobs;
   }
 
+  // 0.5.72 — Atomesus uses an inference backend that crashes if `tools` are present
+  // (returning '"auto" tool choice requires --enable-auto-tool-choice'). Strip
+  // tools completely to force plain text fallback.
+  if (provider === "atomesus" || provider === "atms") {
+    delete next.tools;
+    delete next.tool_choice;
+  }
+
   // If messages have an unexpected 'name' field, some strict providers reject it
   if (Array.isArray(next.messages)) {
     next.messages = next.messages.map(m => {
