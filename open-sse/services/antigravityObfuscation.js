@@ -90,6 +90,7 @@ const BINARY_DATA_FIELDS = new Set([
   "base64",        // generic
   "b64_json",      // OpenAI image gen response shape (echoed back in history)
   "image",         // raw base64 image
+  "url",           // OpenAI / Claude image_url.url fields. Do not inject ZWJ into URLs or they 404
 ]);
 
 function isLikelyDataUrl(s) {

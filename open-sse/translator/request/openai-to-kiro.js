@@ -442,7 +442,7 @@ function convertMessages(messages, tools, model) {
         mergedHistory[mergedHistory.length - 1].userInputMessage) {
       const prev = mergedHistory[mergedHistory.length - 1];
       prev.userInputMessage.content += "\n\n" + current.userInputMessage.content;
-      // Merge context: combine toolResults, images, etc.
+      // Merge context: combine toolResults, tools, etc.
       const prevCtx = prev.userInputMessage.userInputMessageContext;
       const curCtx = current.userInputMessage.userInputMessageContext;
       if (curCtx) {
@@ -456,6 +456,14 @@ function convertMessages(messages, tools, model) {
             prevCtx.tools = [...(prevCtx.tools || []), ...curCtx.tools];
           }
         }
+      }
+      // 0.5.78 — Also merge images! They live on userInputMessage, not inside
+      // userInputMessageContext. If a user sent an image, and then a tool call
+      // fired, and then they sent another message, the image would be lost when
+      // the consecutive user turns merged.
+      const curImages = current.userInputMessage.images;
+      if (curImages?.length > 0) {
+        prev.userInputMessage.images = [...(prev.userInputMessage.images || []), ...curImages];
       }
     } else {
       mergedHistory.push(current);

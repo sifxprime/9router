@@ -1,3 +1,10 @@
+# v0.5.78 (2026-06-29) — Image URL Obfuscation Fix + Kiro Image Merging Fix
+
+Two fixes related to how k‍Router handles images:
+
+1. **Kiro IDE Multiple User Messages Bug:** In `openai-to-kiro.js`, when consecutive user messages were merged into a single AWS CodeWhisperer format message, the text and tool results were merged correctly, but attached images (`images` array) from the second message were dropped. This is now fixed so images properly survive the merge.
+2. **Obfuscation URL Corruption:** Added `"url"` to the `BINARY_DATA_FIELDS` blacklist in `antigravityObfuscation.js`. Previously, if a user provided an image via a URL (e.g. `https://example.com/claude-image.png`), the obfuscator would inject a zero-width joiner into the word "claude", breaking the URL entirely and causing a 404 image fetch error on Google's end. URLs are now passed through cleanly.
+
 # v0.5.77 (2026-06-29) — Fully Wire Zenith Engine into Default Routing
 
 Fixes an oversight in 0.5.75 where the `zenith` routing strategy was added to `accountSelector.js` but the `auth.js` fallback loop still hardcoded the legacy `fill-first` logic inside an `else` block. 
