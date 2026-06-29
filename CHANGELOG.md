@@ -1,3 +1,9 @@
+# v0.5.77 (2026-06-29) — Fully Wire Zenith Engine into Default Routing
+
+Fixes an oversight in 0.5.75 where the `zenith` routing strategy was added to `accountSelector.js` but the `auth.js` fallback loop still hardcoded the legacy `fill-first` logic inside an `else` block. 
+
+Now, `auth.js` delegates all non-round-robin routing decisions directly to the central `accountSelector.js` engine. The default `fill-first` strategy is automatically upgraded to `zenith`, applying the latency + quota scoring algorithms to pick the healthiest account natively.
+
 # v0.5.76 (2026-06-29) — Fix HealthCache Logger Import
 
 Hotfix: The 0.5.75 release contained an incorrect import path for the logger inside `HealthCache.js` (`open-sse/utils/logger.js` instead of `@/sse/utils/logger.js`), which caused the Next.js build to fail with a "Module not found" error. Corrected the path.

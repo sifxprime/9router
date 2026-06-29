@@ -1,7 +1,5 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, updateProviderConnectionAtomic, getSettings } from "@/lib/localDb";
 import { getCachedConnections, lockAccountInMemory } from "@/shared/services/healthCache.js";
-import { getCachedConnections, lockAccountInMemory } from "@/shared/services/healthCache.js";
-import { getCachedConnections, lockAccountInMemory } from "@/shared/services/healthCache.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { isAccountAboveThreshold, warmQuotaCache, invalidateQuotaCache, recordQuotaCacheHit } from "open-sse/services/quotaPreflight.js";
@@ -150,20 +148,6 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     }
     if (connection) {
       // skip strategy
-    } else if (strategy === "p2c" || strategy === "random") {
-      // 0.5.28 — pluggable strategies via accountSelector. P2C avoids the
-      // always-pick-the-same-top-account pattern of fill-first when accounts
-      // are at the same health tier. Random is a uniform sampler for testing.
-      // Zenith strategy: pre-computes scores (latency + success + remaining quota)
-      // for all available accounts and picks the absolute best one.
-      const { account } = selectAccount(availableConnections, strategy, getRoundRobinState(providerId), model);
-      connection = account;
-      if (connection) {
-        await updateProviderConnection(connection.id, {
-          lastUsedAt: new Date().toISOString(),
-          consecutiveUseCount: 1,
-        });
-      }
     } else if (strategy === "round-robin") {
       const stickyLimit = providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3;
 
@@ -204,16 +188,20 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         });
       }
     } else {
-      // Default: fill-first, BUT re-rank by observed health within the same
-      // priority tier. Connections that have been consistently fast and
-      // successful in recent traffic float to the top so the user never has
-      // to manually reorder accounts when one starts degrading.
-      // For brand-new / never-observed connections the rank is neutral so
-      // priority-set order is preserved exactly as before.
-      const ranked = rankConnections(availableConnections);
-      connection = ranked[0];
-      if (ranked[0] !== availableConnections[0]) {
-        log.debug("AUTH", `${provider} | health re-rank promoted ${connection.id?.slice(0, 8)} (score ${scoreOf(connection.id).toFixed(0)}) over ${availableConnections[0].id?.slice(0, 8)} (score ${scoreOf(availableConnections[0].id).toFixed(0)})`);
+      // 0.5.75 — Unified Strategy Routing
+      // Delegates all other strategies (fill-first, p2c, random, zenith) to
+      // the central accountSelector.js engine. The default 'fill-first' is now
+      // upgraded to 'zenith' inside selectAccount(), applying latency + quota
+      // scoring to pick the absolute healthiest account.
+      const { account } = selectAccount(availableConnections, strategy, getRoundRobinState(providerId), model);
+      connection = account;
+      if (connection) {
+        // We only write lastUsedAt asynchronously here since it's just for stats
+        // and doesn't affect the critical path.
+        updateProviderConnection(connection.id, {
+          lastUsedAt: new Date().toISOString(),
+          consecutiveUseCount: 1,
+        }).catch(() => {});
       }
     }
 
